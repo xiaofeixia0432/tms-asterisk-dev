@@ -1,0 +1,13 @@
+[from-internal]
+exten => 1001,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSAlawPlay(/var/lib/asterisk/media/sine-8k-10s.alaw)
+  same =>      n,Hangup()
+
+exten => 1002,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSMp3Play(/var/lib/asterisk/media/sine-8k-10s.mp3)
+  same =>      n,Hangup()
+
+exten => _6XXX,1,Dial(PJSIP/${EXTEN},20)
+

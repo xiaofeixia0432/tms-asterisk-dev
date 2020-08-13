@@ -1,0 +1,5 @@
+conf/*.conf
+logs/
+media/
+.DS_Store
+docker-13/asterisk*/

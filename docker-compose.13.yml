@@ -1,0 +1,24 @@
+version: '3.7'
+services:
+  asterisk:
+    build:
+      context: ./docker-13
+      dockerfile: Dockerfile
+    image: tms/asterisk:13.33.0
+    container_name: tms-asterisk_13.33.0
+    volumes:
+      - ./conf/extensions.conf:/etc/asterisk/extensions.conf
+      - ./conf/pjsip.conf:/etc/asterisk/pjsip.conf
+      - ./conf/rtp.conf:/etc/asterisk/rtp.conf
+      - ./conf/http.conf:/etc/asterisk/http.conf
+      - ./conf/ari.conf:/etc/asterisk/ari.conf
+      - ./conf/logger.conf:/etc/asterisk/logger.conf
+      - ./logs:/var/log/asterisk
+      - ./media:/var/lib/asterisk/media
+      - ./tms-restart.sh:/usr/src/asterisk/tms-restart.sh
+      - ./tms-apps/app_tms_alaw.c:/usr/src/asterisk/apps/app_tms_alaw.c
+      - ./tms-apps/app_tms_mp3.c:/usr/src/asterisk/apps/app_tms_mp3.c
+    ports:
+      - 8088:8088
+      - 5060:5060/udp
+      - 10000-10020:10000-10020/udp
