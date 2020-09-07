@@ -4,10 +4,15 @@ exten => 1001,1,NoOp()
   same = n,TMSAlawPlay(/var/lib/asterisk/media/sine-8k-10s.alaw)
   same =>      n,Hangup()
 
-exten => 1002,1,NoOp()
+exten => 2001,1,NoOp()
   same =>      n,Answer()
   same = n,TMSMp3Play(/var/lib/asterisk/media/sine-8k-10s.mp3)
   same =>      n,Hangup()
 
-exten => _6XXX,1,Dial(PJSIP/${EXTEN},20)
+exten => 3001,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSH264Play(/var/lib/asterisk/media/color-red-10s.h264)
+  same =>      n,Hangup()
+
+exten => _9XXX,1,Dial(PJSIP/${EXTEN},20)
 

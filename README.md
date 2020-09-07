@@ -111,4 +111,5 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 | 号码 | 功能               | 代码           |
 | ---- | ------------------ | -------------- |
 | 1001 | 播放 alaw 格式文件 | app_tms_alaw.c |
-| 1002 | 播放 mp3 格式文件  | app_tms_mp3.c  |
+| 2001 | 播放 mp3 格式文件  | app_tms_mp3.c  |
+| 3001 | 播放 h264 格式文件 | app_tms_h264.c |
