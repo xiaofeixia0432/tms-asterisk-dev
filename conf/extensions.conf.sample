@@ -14,5 +14,15 @@ exten => 3001,1,NoOp()
   same = n,TMSH264Play(/var/lib/asterisk/media/color-red-10s.h264)
   same =>      n,Hangup()
 
+exten => 4001,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSMp4Play(/var/lib/asterisk/media/sine-red-10s.mp4)
+  same =>      n,Hangup()
+
+exten => 4002,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSMp4Play(/var/lib/asterisk/media/sine-8k-red-10s.mp4)
+  same =>      n,Hangup()
+
 exten => _9XXX,1,Dial(PJSIP/${EXTEN},20)
 

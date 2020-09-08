@@ -19,6 +19,7 @@ services:
       - ./tms-apps/app_tms_alaw.c:/usr/src/asterisk/apps/app_tms_alaw.c
       - ./tms-apps/app_tms_mp3.c:/usr/src/asterisk/apps/app_tms_mp3.c
       - ./tms-apps/app_tms_h264.c:/usr/src/asterisk/apps/app_tms_h264.c
+      - ./tms-apps/app_tms_mp4.c:/usr/src/asterisk/apps/app_tms_mp4.c
     ports:
       - 8088:8088
       - 5060:5060/udp

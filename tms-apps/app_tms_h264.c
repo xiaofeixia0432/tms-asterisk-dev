@@ -791,9 +791,9 @@ static int load_module(void)
 {
   int res = ast_register_application(app_play, h264_play, syn_play, des_play);
 
-  av_log_set_callback(my_av_log_callback);
+  //av_log_set_callback(my_av_log_callback);
 
   return res;
 }
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Video(FFmpeg) applications");
+AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "TMS h264 player applications");

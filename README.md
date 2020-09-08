@@ -108,8 +108,38 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 # 应用（tms-apps 目录）
 
-| 号码 | 功能               | 代码           |
-| ---- | ------------------ | -------------- |
-| 1001 | 播放 alaw 格式文件 | app_tms_alaw.c |
-| 2001 | 播放 mp3 格式文件  | app_tms_mp3.c  |
-| 3001 | 播放 h264 格式文件 | app_tms_h264.c |
+| 号码 | 功能               | 代码           | 说明         |
+| ---- | ------------------ | -------------- | ------------ |
+| 1001 | 播放 alaw 格式文件 | app_tms_alaw.c |              |
+| 2001 | 播放 mp3 格式文件  | app_tms_mp3.c  |              |
+| 3001 | 播放 h264 格式文件 | app_tms_h264.c |              |
+| 4001 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 44.1k |
+| 4002 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 8k    |
+
+因为 rtp 接收端音频采样率位 8k，如果输入的音频采样率高，会导致失真。
+
+# ffmpeg 命令
+
+在`media`目录下，可以使用`ffmpeg`命令生成指定规格的样本文件。文件名称应该和`extensions.conf`中的内容一致。
+
+默认规则的 mp4 文件
+
+> ffmpeg -t 10 -lavfi sine -t 10 -lavfi color=red sine-red-10s.mp4
+
+指定音频采样率，生成 mp4 文件
+
+> ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi color=red sine-8k-red-10s.mp4
+
+# ffprobe 命令
+
+查看媒体文件基本信息
+
+> ffprobe sine-red-10s.mp4
+
+查看媒体文件的 packet 并输出到文件
+
+> ffprobe -show_packets color-red-10s.h264 > packets.txt
+
+查看媒体文件的 frame 并输出到文件
+
+> ffprobe -show_frames color-red-10s.h264 > frames.txt
