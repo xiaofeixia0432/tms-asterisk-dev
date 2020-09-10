@@ -62,17 +62,18 @@ static const char *des_play = "  TMSH264Play(filename,[options]):  Play h264 fil
 
 #define FF_RTP_FLAG_H264_MODE0 8
 
-#define TMS_DEBUG_RTP 0
+#define RTP_H264_TIME_BASE 90000
+
+#define TMS_H264_DEBUG_RTP 0
+#define TMS_H264_DEBUG_AV_FRAME 0
+#define TMS_H264_DEBUG_FFMPEG 0
 
 typedef struct InputStream
 {
   struct ast_channel *chan;
-  const char *name;
   AVStream *st;
   AVCodecContext *dec_ctx;
   char *src;
-  struct ast_format *format;
-  int bytes_per_sample;
 
   int saw_first_ts;
 
@@ -82,22 +83,6 @@ typedef struct InputStream
   int64_t next_dts;
   int64_t dts; ///< dts of the last packet read for this stream (in AV_TIME_BASE units)
 } InputStream;
-
-#define SIGN_BIT (0x80)
-#define SEG_MASK (0x70)
-#define QUANT_MASK (0xf)
-#define SEG_SHIFT (4)
-
-typedef struct NALU
-{
-  int startcodeprefix_len; //! 4 for parameter sets and first slice in picture, 3 for everything else (suggested)
-  unsigned len;            //! Length of the NAL unit (Excluding the start code, which does not belong to the NALU)
-  unsigned max_size;       //! Nal Unit Buffer size
-  int forbidden_bit;       //! should be always FALSE
-  int nal_reference_idc;   //! NALU_PRIORITY_xxxx
-  int nal_unit_type;       //! NALU_TYPE_xxxx
-  char *buf;               //! contains the first byte followed by the EBSP
-} NALU;
 
 typedef struct RTPMuxContext
 {
@@ -136,14 +121,14 @@ typedef struct RTPMuxContext
 
   int flags;
 
-  unsigned int frame_count;
+  unsigned int nb_rtp_frames;
 
   InputStream *video;
 } RTPMuxContext;
 
 static void ff_rtp_send_data(RTPMuxContext *s, const uint8_t *buf1, int len, int m)
 {
-  if (TMS_DEBUG_RTP)
+  if (TMS_H264_DEBUG_RTP)
   {
     ast_debug(1, "进入ff_rtp_send_data len=%d M=%d\n", len, m);
   }
@@ -171,7 +156,7 @@ static void ff_rtp_send_data(RTPMuxContext *s, const uint8_t *buf1, int len, int
   f->ts = s->timestamp;
   /* Don't free the frame outside */
   f->mallocd = 0;
-  f->subclass.format = s->video->format;
+  f->subclass.format = ast_format_h264;
   f->subclass.frame_ending = m;
   f->offset = AST_FRIENDLY_OFFSET;
 
@@ -182,22 +167,22 @@ static void ff_rtp_send_data(RTPMuxContext *s, const uint8_t *buf1, int len, int
 
   memcpy(data, buf1, len);
 
-  s->frame_count++;
+  s->nb_rtp_frames++;
 
   /* Write frame */
   ast_write(s->video->chan, f);
 
   ast_frfree(f);
 
-  if (TMS_DEBUG_RTP)
+  if (TMS_H264_DEBUG_RTP)
   {
-    ast_debug(1, "[chan %p] 完成第 %d 个视频RTP帧发送 \n", s->video->chan, s->frame_count);
+    ast_debug(1, "[chan %p] 完成第 %d 个视频RTP帧发送 \n", s->video->chan, s->nb_rtp_frames);
   }
 }
 
 static void flush_buffered(RTPMuxContext *s, int last)
 {
-  if (TMS_DEBUG_RTP)
+  if (TMS_H264_DEBUG_RTP)
   {
     ast_debug(1, "flush_buffered\n");
   }
@@ -207,11 +192,7 @@ static void flush_buffered(RTPMuxContext *s, int last)
     // the STAP-A/AP framing
     if (s->buffered_nals == 1)
     {
-      enum AVCodecID codec = AV_CODEC_ID_H264;
-      if (codec == AV_CODEC_ID_H264)
-        ff_rtp_send_data(s, s->buf + 3, s->buf_ptr - s->buf - 3, last);
-      else
-        ff_rtp_send_data(s, s->buf + 4, s->buf_ptr - s->buf - 4, last);
+      ff_rtp_send_data(s, s->buf + 3, s->buf_ptr - s->buf - 3, last);
     }
     else
     {
@@ -222,12 +203,11 @@ static void flush_buffered(RTPMuxContext *s, int last)
   s->buffered_nals = 0;
 }
 
-static void nal_send(RTPMuxContext *s, const uint8_t *buf, int size, int last)
+static void h264_nal_send(RTPMuxContext *s, const uint8_t *buf, int size, int last)
 {
-  enum AVCodecID codec = AV_CODEC_ID_H264;
   int nalu_type = buf[0] & 0x1F;
 
-  if (TMS_DEBUG_RTP)
+  if (TMS_H264_DEBUG_RTP)
   {
     ast_debug(1, "Sending NAL %x of len %d M=%d\n", nalu_type, size, last);
   }
@@ -241,15 +221,8 @@ static void nal_send(RTPMuxContext *s, const uint8_t *buf, int size, int last)
     int header_size;
     int skip_aggregate = 1;
 
-    if (codec == AV_CODEC_ID_H264)
-    {
-      header_size = 1;
-      //skip_aggregate = s->flags & FF_RTP_FLAG_H264_MODE0;
-    }
-    else
-    {
-      header_size = 2;
-    }
+    header_size = 1;
+    //skip_aggregate = s->flags & FF_RTP_FLAG_H264_MODE0;
 
     // Flush buffered NAL units if the current unit doesn't fit
     if (buffered_size + 2 + size > s->max_payload_size)
@@ -266,15 +239,7 @@ static void nal_send(RTPMuxContext *s, const uint8_t *buf, int size, int last)
     {
       if (buffered_size == 0)
       {
-        if (codec == AV_CODEC_ID_H264)
-        {
-          *s->buf_ptr++ = 24;
-        }
-        else
-        {
-          *s->buf_ptr++ = 48 << 1;
-          *s->buf_ptr++ = 1;
-        }
+        *s->buf_ptr++ = 24;
       }
       AV_WB16(s->buf_ptr, size);
       s->buf_ptr += 2;
@@ -292,73 +257,28 @@ static void nal_send(RTPMuxContext *s, const uint8_t *buf, int size, int last)
   {
     int flag_byte, header_size;
     flush_buffered(s, 0);
-    if (codec == AV_CODEC_ID_H264 && (s->flags & FF_RTP_FLAG_H264_MODE0))
+    if (s->flags & FF_RTP_FLAG_H264_MODE0)
     {
       ast_debug(1, "NAL size %d > %d, try -slice-max-size %d\n", size, s->max_payload_size, s->max_payload_size);
       return;
     }
-    if (TMS_DEBUG_RTP)
+    if (TMS_H264_DEBUG_RTP)
     {
       ast_debug(1, "NAL size %d > %d\n", size, s->max_payload_size);
     }
-    if (codec == AV_CODEC_ID_H264)
-    {
-      uint8_t type = buf[0] & 0x1F;
-      uint8_t nri = buf[0] & 0x60;
 
-      s->buf[0] = 28; /* FU Indicator; Type = 28 ---> FU-A */
-      s->buf[0] |= nri;
-      s->buf[1] = type;
-      s->buf[1] |= 1 << 7;
-      buf += 1;
-      size -= 1;
+    uint8_t type = buf[0] & 0x1F;
+    uint8_t nri = buf[0] & 0x60;
 
-      flag_byte = 1;
-      header_size = 2;
-    }
-    else
-    {
-      uint8_t nal_type = (buf[0] >> 1) & 0x3F;
-      /*
-	           * create the HEVC payload header and transmit the buffer as fragmentation units (FU)
-	           *
-	           *    0                   1
-	           *    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
-	           *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-	           *   |F|   Type    |  LayerId  | TID |
-	           *   +-------------+-----------------+
-	           *
-	           *      F       = 0
-	           *      Type    = 49 (fragmentation unit (FU))
-	           *      LayerId = 0
-	           *      TID     = 1
-	           */
-      s->buf[0] = 49 << 1;
-      s->buf[1] = 1;
+    s->buf[0] = 28; /* FU Indicator; Type = 28 ---> FU-A */
+    s->buf[0] |= nri;
+    s->buf[1] = type;
+    s->buf[1] |= 1 << 7;
+    buf += 1;
+    size -= 1;
 
-      /*
-	           *     create the FU header
-	           *
-	           *     0 1 2 3 4 5 6 7
-	           *    +-+-+-+-+-+-+-+-+
-	           *    |S|E|  FuType   |
-	           *    +---------------+
-	           *
-	           *       S       = variable
-	           *       E       = variable
-	           *       FuType  = NAL unit type
-	           */
-      s->buf[2] = nal_type;
-      /* set the S bit: mark as start fragment */
-      s->buf[2] |= 1 << 7;
-
-      /* pass the original NAL header */
-      buf += 2;
-      size -= 2;
-
-      flag_byte = 2;
-      header_size = 3;
-    }
+    flag_byte = 1;
+    header_size = 2;
 
     while (size + header_size > s->max_payload_size)
     {
@@ -372,23 +292,6 @@ static void nal_send(RTPMuxContext *s, const uint8_t *buf, int size, int last)
     memcpy(&s->buf[header_size], buf, size);
     ff_rtp_send_data(s, s->buf, size + header_size, last);
   }
-}
-
-static const uint8_t *ff_avc_mp4_find_startcode(const uint8_t *start,
-                                                const uint8_t *end,
-                                                int nal_length_size)
-{
-  unsigned int res = 0;
-
-  if (end - start < nal_length_size)
-    return NULL;
-  while (nal_length_size--)
-    res = (res << 8) | *start++;
-
-  if (res > end - start)
-    return NULL;
-
-  return start + res;
 }
 
 static const uint8_t *ff_avc_find_startcode_internal(const uint8_t *p, const uint8_t *end)
@@ -442,38 +345,25 @@ static const uint8_t *ff_avc_find_startcode(const uint8_t *p, const uint8_t *end
   return out;
 }
 
-static void ff_rtp_send_h264_hevc(RTPMuxContext *s, const uint8_t *buf1, int size)
+static void ff_rtp_send_h264(RTPMuxContext *s, const uint8_t *buf1, int size)
 {
   const uint8_t *r, *end = buf1 + size;
-  int nal_length_size = 0;
 
   s->buf_ptr = s->buf;
 
-  if (nal_length_size)
-    r = ff_avc_mp4_find_startcode(buf1, end, nal_length_size) ? buf1 : end;
-  else
-    r = ff_avc_find_startcode(buf1, end);
+  r = ff_avc_find_startcode(buf1, end);
   while (r < end)
   {
     const uint8_t *r1;
 
-    if (nal_length_size)
+    while (!*(r++))
+      ;
+    r1 = ff_avc_find_startcode(r, end);
+    h264_nal_send(s, r, r1 - r, r1 == end);
+
+    if (TMS_H264_DEBUG_RTP)
     {
-      r1 = ff_avc_mp4_find_startcode(r, end, nal_length_size);
-      if (!r1)
-        r1 = end;
-      r += nal_length_size;
-    }
-    else
-    {
-      while (!*(r++))
-        ;
-      r1 = ff_avc_find_startcode(r, end);
-    }
-    nal_send(s, r, r1 - r, r1 == end);
-    if (TMS_DEBUG_RTP)
-    {
-      ast_debug(1, "ff_rtp_send_h264_hevc.nal_send r = %p r1 = %p end = %p\n", r, r1, end);
+      ast_debug(1, "ff_rtp_send_h264.h264_nal_send r = %p r1 = %p end = %p\n", r, r1, end);
     }
     r = r1;
   }
@@ -483,6 +373,9 @@ static void ff_rtp_send_h264_hevc(RTPMuxContext *s, const uint8_t *buf1, int siz
 /* 输出视频帧调试信息 */
 static void tms_dump_h264_frame(int nb_frames, AVFrame *frame, AVCodecContext *cctx)
 {
+  if (!TMS_H264_DEBUG_AV_FRAME)
+    return;
+
   ast_debug(1, "读取 frame #%d dts = %s pts = %s key_frame = %d picture_type = %c pkt_pos=%ld pkt_size = %d coded_picture_number = %d display_picture_number = %d\n",
             nb_frames,
             av_ts2timestr(frame->pkt_dts, &cctx->time_base),
@@ -496,28 +389,26 @@ static void tms_dump_h264_frame(int nb_frames, AVFrame *frame, AVCodecContext *c
 }
 
 /* 输出视频包调试信息 */
-static void tms_dump_h264_packet(int nb_packets, AVPacket *pkt, AVCodecContext *cctx)
+static void tms_dump_h264_packet(int nb_packets, AVPacket *pkt, InputStream *ist)
 {
+  AVStream *st = ist->st;
   uint8_t *pkt_data = pkt->data;
 
-  /* 前4个字节是startcode，第5个字节是nalu_header */
-  NALU nalu;
-  nalu.forbidden_bit = pkt_data[4] & 0x80;     //1 bit
-  nalu.nal_reference_idc = pkt_data[4] & 0x60; // 2 bit
-  nalu.nal_unit_type = pkt_data[4] & 0x1f;     // 5 bit
+  /* 前4个字节是startcode，第5个字节是nalu_header，其中后5位是type */
+  int nal_unit_type = pkt_data[4] & 0x1f; // 5 bit
 
-  int64_t dts = pkt->dts == INT64_MIN ? -1 : pkt->dts;
-  int64_t pts = pkt->pts == INT64_MIN ? -1 : pkt->pts;
-
-  ast_debug(1, "读取 packet #%d size= %d nal_unit_type = %d dts = %s pts = %s\n",
+  ast_debug(1, "读取 packet #%d size= %d nal_unit_type = %d dts = %s pts = %s duration = %s duration_av_time = %s\n",
             nb_packets,
             pkt->size,
-            nalu.nal_unit_type,
-            av_ts2timestr(dts, &cctx->time_base),
-            av_ts2timestr(pts, &cctx->time_base));
+            nal_unit_type,
+            av_ts2str(pkt->dts),
+            av_ts2str(pkt->pts),
+            av_ts2str(pkt->duration),
+            av_ts2str(av_rescale_q(pkt->duration, st->time_base, AV_TIME_BASE_Q)));
+
   if (nb_packets < 8)
   {
-    ast_debug(2, "av_read_frame.packet 前12个字节 %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", pkt_data[0], pkt_data[1], pkt_data[2], pkt_data[3], pkt_data[4], pkt_data[5], pkt_data[6], pkt_data[7], pkt_data[8], pkt_data[9], pkt_data[10], pkt_data[11]);
+    ast_debug(2, "读取 packet #%d 前12个字节 %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", nb_packets, pkt_data[0], pkt_data[1], pkt_data[2], pkt_data[3], pkt_data[4], pkt_data[5], pkt_data[6], pkt_data[7], pkt_data[8], pkt_data[9], pkt_data[10], pkt_data[11]);
   }
 }
 
@@ -577,19 +468,26 @@ static int process_frame(char *filename, AVCodecContext *cctx, AVPacket *pkt, AV
 static int h264_play(struct ast_channel *chan, const char *data)
 {
   struct ast_module_user *u = NULL;
-  InputStream video = {chan, 0, NULL, NULL, 0, 0, 0, 0, AV_NOPTS_VALUE, AV_NOPTS_VALUE, AV_NOPTS_VALUE};
+
+  InputStream video = {
+      .chan = chan,
+      .start = AV_NOPTS_VALUE,
+      .next_dts = AV_NOPTS_VALUE,
+      .dts = AV_NOPTS_VALUE};
+
   uint8_t buf[1470];
   RTPMuxContext rtp_mux_ctx = {
       .buf = buf,
       .max_payload_size = 1400,
       .buffered_nals = 0,
       .flags = 0,
-      .frame_count = 0,
+      .nb_rtp_frames = 0,
       .video = &video};
 
-  char *filename; // 要打开的文件
-  int ret = 0;    // 返回结果
-  char src[128];  // rtp.src
+  char *filename;                 // 要打开的文件
+  int option_rtp_frame_tight = 0; // 是否在rtp帧间添加时间间隔
+  int ret = 0;                    // 返回结果
+  char src[128];                  // rtp.src
   char *parse;
 
   AST_DECLARE_APP_ARGS(args, AST_APP_ARG(filename); AST_APP_ARG(options););
@@ -612,6 +510,11 @@ static int h264_play(struct ast_channel *chan, const char *data)
   AVFormatContext *ictx = NULL;
 
   filename = (char *)args.filename;
+  if (args.options)
+  {
+    if (strcasestr(args.options, "tight"))
+      option_rtp_frame_tight = 1;
+  }
 
   /* 打开指定的媒体文件 */
   if ((ret = avformat_open_input(&ictx, filename, NULL, NULL)) < 0)
@@ -667,38 +570,31 @@ static int h264_play(struct ast_channel *chan, const char *data)
 
   struct InputStream *ist = &video;
 
-  ist->name = codec->name;
   ist->st = st;
   ist->dec_ctx = cctx;
-  ist->bytes_per_sample = av_get_bytes_per_sample(cctx->sample_fmt);
-  ist->format = ast_format_h264;
-
-  int64_t dts = st->avg_frame_rate.num ? -cctx->has_b_frames * AV_TIME_BASE / av_q2d(st->avg_frame_rate) : 0;
 
   ast_debug(1, "H264 Stream\n");
-  ast_debug(1, "-- codec.name %s\n", codec->name);
   ast_debug(1, "-- stream.avg_frame_rate(%d, %d)\n", st->avg_frame_rate.num, st->avg_frame_rate.den);
   ast_debug(1, "-- stream.tbn(%d, %d)\n", st->time_base.num, st->time_base.den);
+  ast_debug(1, "-- stream.time_base = (%d, %d)\n", st->time_base.num, st->time_base.den);
   ast_debug(1, "-- stream.duration = %s\n", av_ts2str(st->duration));
   ast_debug(1, "-- codec_context.has_b_frames = %d\n", cctx->has_b_frames);
-  ast_debug(1, "-- dts = %ld\n", dts);
 
-  int64_t start_time = av_gettime_relative(); // Get the current time in microseconds.
   AVPacket *pkt = av_packet_alloc();
   AVFrame *frame = av_frame_alloc();
 
-  //rtp_mux_ctx.base_timestamp = av_get_random_seed();
-  rtp_mux_ctx.base_timestamp = 100000;
+  rtp_mux_ctx.base_timestamp = 80000; // 可以是任意的一个值？av_get_random_seed();
   rtp_mux_ctx.timestamp = rtp_mux_ctx.base_timestamp;
   rtp_mux_ctx.cur_timestamp = 0;
 
+  int64_t start_time = av_gettime_relative(); // 开始时间（microseconds）
+  int64_t elapse = 0, end_time = 0, latest_dts = 0;
   int nb_packets = 0, nb_frames = 0;
   while (1)
   {
     if ((ret = av_read_frame(ictx, pkt)) == AVERROR_EOF)
     {
-      int64_t end_time = av_gettime_relative();
-      ast_debug(1, "完成从文件中读取媒体包，共读取 %d 个包，耗时 %ld\n", nb_packets, end_time - start_time);
+      end_time = av_gettime_relative();
       break;
     }
     else if (ret < 0)
@@ -709,9 +605,9 @@ static int h264_play(struct ast_channel *chan, const char *data)
 
     nb_packets++;
 
-    tms_dump_h264_packet(nb_packets, pkt, cctx);
+    tms_dump_h264_packet(nb_packets, pkt, ist);
 
-    /* 对于发送rtp包来说，是不需要解析媒体帧 */
+    /* 发送rtp包不需要解析媒体帧，这里只是为了查看数据 */
     int packet_new = 1;
     while (process_frame(filename, cctx, pkt, frame, &nb_frames, &packet_new) < 0)
       ;
@@ -729,24 +625,31 @@ static int h264_play(struct ast_channel *chan, const char *data)
     }
 
     /* 添加发送间隔 */
-    int64_t dts = av_rescale(video.dts, 1000000, AV_TIME_BASE);
-    int64_t now = av_gettime_relative() - start_time;
-    if (dts > now)
-    {
-      usleep(dts - now);
-    }
+    latest_dts = video.dts;
+    elapse = av_gettime_relative() - start_time;
 
+    /* 每帧之间添加时间间隔 */
+    if (latest_dts >= 0)
+    {
+      if (latest_dts > elapse)
+      {
+        if (!option_rtp_frame_tight)
+          usleep(latest_dts - elapse);
+      }
+    }
+    /* 用每个帧的播放时长作为dts时间间隔 */
     video.next_dts += av_rescale_q(pkt->duration, video.st->time_base, AV_TIME_BASE_Q);
 
-    // 从ffmpeg的dts时间转为rtp的时间
-    int64_t video_ts = rtp_mux_ctx.base_timestamp + dts;
-    int64_t rtp_ts = av_rescale(video_ts, 90000, AV_TIME_BASE);
+    // 视频的以ffmpeg时间基数计算的时间戳
+    int64_t av_ts = rtp_mux_ctx.base_timestamp + latest_dts;
+    // 用rpt时间基数计算的时间戳
+    int64_t rtp_ts = av_rescale(av_ts, RTP_H264_TIME_BASE, AV_TIME_BASE);
     rtp_mux_ctx.cur_timestamp = rtp_ts;
 
-    ast_debug(2, "now = %ld dts = %ld base_timestamp = %d video_ts = %ld rtp_ts = %ld\n", now, dts, rtp_mux_ctx.base_timestamp, video_ts, rtp_ts);
+    ast_debug(2, "发送 packet #%d elapse = %ld dts = %ld av_ts = %ld rtp_ts = %ld\n", nb_packets, elapse, latest_dts, av_ts, rtp_ts);
 
     /* 发送RTP包 */
-    ff_rtp_send_h264_hevc(&rtp_mux_ctx, pkt->data, pkt->size);
+    ff_rtp_send_h264(&rtp_mux_ctx, pkt->data, pkt->size);
   }
 
   av_packet_unref(pkt);
@@ -754,6 +657,15 @@ static int h264_play(struct ast_channel *chan, const char *data)
   //Flush remaining frames that are cached in the decoder
   while (process_frame(filename, cctx, pkt, frame, &nb_frames, &(int){1}) > 0)
     ;
+
+  elapse = end_time - start_time;
+  ast_debug(1, "完成从文件中读取媒体包，共读取 %d 个包，发送 %d 个包，耗时 %ld，最后解码时间：%ld\n", nb_packets, rtp_mux_ctx.nb_rtp_frames, elapse, latest_dts);
+
+  if (option_rtp_frame_tight)
+  {
+    if (latest_dts)
+      usleep(latest_dts - elapse);
+  }
 
 end:
   /* Log end */
@@ -791,7 +703,8 @@ static int load_module(void)
 {
   int res = ast_register_application(app_play, h264_play, syn_play, des_play);
 
-  //av_log_set_callback(my_av_log_callback);
+  if (TMS_H264_DEBUG_FFMPEG)
+    av_log_set_callback(my_av_log_callback);
 
   return res;
 }

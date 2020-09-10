@@ -14,6 +14,26 @@ exten => 3001,1,NoOp()
   same = n,TMSH264Play(/var/lib/asterisk/media/color-red-10s.h264)
   same =>      n,Hangup()
 
+exten => 3002,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSH264Play(/var/lib/asterisk/media/color-red-green-10s.h264)
+  same =>      n,Hangup()
+
+exten => 3003,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSH264Play(/var/lib/asterisk/media/color-red-green-10s.h264,tight)
+  same =>      n,Hangup()
+
+exten => 3004,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSH264Play(/var/lib/asterisk/media/color-red-1s-green-9s.h264,tight)
+  same =>      n,Hangup()
+
+exten => 3010,1,NoOp()
+  same =>      n,Answer()
+  same = n,TMSH264Play(/var/lib/asterisk/media/testsrc2-10s.h264)
+  same =>      n,Hangup()
+
 exten => 4001,1,NoOp()
   same =>      n,Answer()
   same = n,TMSMp4Play(/var/lib/asterisk/media/sine-red-10s.mp4)

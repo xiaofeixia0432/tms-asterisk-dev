@@ -108,19 +108,38 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 # 应用（tms-apps 目录）
 
-| 号码 | 功能               | 代码           | 说明         |
-| ---- | ------------------ | -------------- | ------------ |
-| 1001 | 播放 alaw 格式文件 | app_tms_alaw.c |              |
-| 2001 | 播放 mp3 格式文件  | app_tms_mp3.c  |              |
-| 3001 | 播放 h264 格式文件 | app_tms_h264.c |              |
-| 4001 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 44.1k |
-| 4002 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 8k    |
+| 号码 | 功能               | 代码           | 说明                                     |
+| ---- | ------------------ | -------------- | ---------------------------------------- |
+| 1001 | 播放 alaw 格式文件 | app_tms_alaw.c |                                          |
+| 2001 | 播放 mp3 格式文件  | app_tms_mp3.c  |                                          |
+| 3001 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1                                 |
+| 3002 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1，包含红色和绿色                 |
+| 3003 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1，包含红色和绿色，rtp 帧间无间隔 |
+| 3010 | 播放 h264 格式文件 | app_tms_h264.c | testsrc 生成视频，带变化的数字           |
+| 4001 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 44.1k                             |
+| 4002 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 8k                                |
 
 因为 rtp 接收端音频采样率位 8k，如果输入的音频采样率高，会导致失真。
 
 # ffmpeg 命令
 
 在`media`目录下，可以使用`ffmpeg`命令生成指定规格的样本文件。文件名称应该和`extensions.conf`中的内容一致。
+
+红色 h264 文件，包括 I/P/B 帧，只有 1 个 I 帧
+
+> ffmpeg -t 10 -lavfi color=red color-red-10s.h264
+
+绿色 h264 文件，包括 I/P/B 帧，只有 1 个 I 帧
+
+> ffmpeg -t 10 -lavfi color=green color-green-10s.h264
+
+将红色和绿色两个视频合并为 1 个 10 秒的视频
+
+> ffmpeg -t 2 -i color-red-10s.h264 -t 8 -i color-green-10s.h264 -filter_complex "[0:0][1:0] concat=n=2:v=1 [v]" -map '[v]' color-red-2s-green-8s.h264
+
+数字变化的 h264 文件
+
+> ffmpeg -t 10s -lavfi testsrc2 testsrc2-10s.h264
 
 默认规则的 mp4 文件
 
