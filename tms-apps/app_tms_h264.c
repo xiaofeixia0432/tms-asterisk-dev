@@ -583,7 +583,9 @@ static int h264_play(struct ast_channel *chan, const char *data)
   AVPacket *pkt = av_packet_alloc();
   AVFrame *frame = av_frame_alloc();
 
-  rtp_mux_ctx.base_timestamp = 80000; // 可以是任意的一个值？av_get_random_seed();
+  // 应用有可能在一个dialplan中多次调用，所以应该用当前时间保证多个应用间的时间戳是连续增长的
+  struct timeval now = ast_tvnow();
+  rtp_mux_ctx.base_timestamp = now.tv_sec * 1000000 + now.tv_usec;
   rtp_mux_ctx.timestamp = rtp_mux_ctx.base_timestamp;
   rtp_mux_ctx.cur_timestamp = 0;
 
@@ -669,7 +671,7 @@ static int h264_play(struct ast_channel *chan, const char *data)
 
 end:
   /* Log end */
-  ast_log(LOG_DEBUG, "TMSH264Play end.\n");
+  ast_log(LOG_DEBUG, "TMSH264Play(%d) end.\n", ret);
 
 clean:
   if (frame)
@@ -687,7 +689,7 @@ clean:
   free(parse);
 
   /* Exit */
-  return ret;
+  return 0;
 }
 
 static int unload_module(void)

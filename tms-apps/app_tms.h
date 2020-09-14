@@ -1,0 +1,1 @@
+#define RTP_H264_TIME_BASE 90000 // RTP中h264流的时间基

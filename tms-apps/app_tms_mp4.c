@@ -53,6 +53,8 @@
 #include <libavutil/timestamp.h>
 #include <libswresample/swresample.h>
 
+#include "app_tms.h"
+
 static const char *app_play = "TMSMp4Play";
 static const char *syn_play = "MP4 file playblack";
 static const char *des_play = "  TMSMp4Play(filename,[options]):  Play mp4 file to user. \n";
@@ -844,8 +846,9 @@ static int mp4_play(struct ast_channel *chan, const char *data)
     }
   }
 
-  //video_rtp_ctx.base_timestamp = av_get_random_seed();
-  video_rtp_ctx.base_timestamp = 100000;
+  // 应用有可能在一个dialplan中多次调用，所以应该用当前时间保证多个应用间的时间戳是连续增长的
+  struct timeval now = ast_tvnow();
+  video_rtp_ctx.base_timestamp = now.tv_sec * AV_TIME_BASE + now.tv_usec;
   video_rtp_ctx.timestamp = video_rtp_ctx.base_timestamp;
   video_rtp_ctx.cur_timestamp = 0;
 
@@ -906,21 +909,19 @@ static int mp4_play(struct ast_channel *chan, const char *data)
       }
 
       /* 添加发送间隔 */
-      int64_t pts = av_rescale(ist->dts, 1000000, AV_TIME_BASE);
-      int64_t now = av_gettime_relative() - player.start_time;
-      if (pts > now)
-      {
-        usleep(pts - now);
-      }
+      int64_t dts = ist->dts;
+      int64_t elapse = av_gettime_relative() - player.start_time;
+      if (dts > elapse)
+        usleep(dts - elapse);
 
       ist->next_dts += av_rescale_q(pkt->duration, ist->st->time_base, AV_TIME_BASE_Q);
 
       // 从ffmpeg的时间转为rtp的时间
-      int64_t video_ts = video_rtp_ctx.base_timestamp + pts;
-      int64_t rtp_ts = av_rescale(video_ts, 90000, AV_TIME_BASE);
+      int64_t video_ts = video_rtp_ctx.base_timestamp + dts;
+      int64_t rtp_ts = av_rescale(video_ts, RTP_H264_TIME_BASE, AV_TIME_BASE);
       video_rtp_ctx.cur_timestamp = rtp_ts;
 
-      ast_debug(2, "now = %ld pts = %ld base_timestamp = %d video_ts = %ld rtp_ts = %ld\n", now, pts, video_rtp_ctx.base_timestamp, video_ts, rtp_ts);
+      ast_debug(2, "elapse = %ld dts = %ld base_timestamp = %d video_ts = %ld rtp_ts = %ld\n", elapse, dts, video_rtp_ctx.base_timestamp, video_ts, rtp_ts);
 
       /* 发送RTP包 */
       ff_rtp_send_h264(&video_rtp_ctx, pkt->data, pkt->size, &player);
@@ -928,7 +929,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
     else if (ist->codec->type == AVMEDIA_TYPE_AUDIO)
     {
       player.nb_audio_packets++;
-      /* 读取音频 */
+      /* 将媒体包发送给解码器 */
       if ((ret = avcodec_send_packet(ist->dec_ctx, pkt)) < 0)
       {
         ast_log(LOG_WARNING, "读取音频包 #%d 失败 %s\n", player.nb_audio_packets, av_err2str(ret));
@@ -951,7 +952,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
           goto clean;
         }
 
-        player.nb_audio_frames++; // 处理新音频帧
+        player.nb_audio_frames++;
         tms_dump_audio_frame(frame, &player);
 
         /* 添加发送间隔 */
@@ -1036,7 +1037,7 @@ clean:
   free(parse);
 
   /* Exit */
-  return ret;
+  return 0;
 }
 
 static int unload_module(void)

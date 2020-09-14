@@ -16,6 +16,7 @@ services:
       - ./logs:/var/log/asterisk
       - ./media:/var/lib/asterisk/media
       - ./tms-restart.sh:/usr/src/asterisk/tms-restart.sh
+      - ./tms-apps/app_tms.h:/usr/src/asterisk/apps/app_tms.h
       - ./tms-apps/app_tms_alaw.c:/usr/src/asterisk/apps/app_tms_alaw.c
       - ./tms-apps/app_tms_mp3.c:/usr/src/asterisk/apps/app_tms_mp3.c
       - ./tms-apps/app_tms_h264.c:/usr/src/asterisk/apps/app_tms_h264.c

@@ -108,16 +108,21 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 # 应用（tms-apps 目录）
 
-| 号码 | 功能               | 代码           | 说明                                     |
-| ---- | ------------------ | -------------- | ---------------------------------------- |
-| 1001 | 播放 alaw 格式文件 | app_tms_alaw.c |                                          |
-| 2001 | 播放 mp3 格式文件  | app_tms_mp3.c  |                                          |
-| 3001 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1                                 |
-| 3002 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1，包含红色和绿色                 |
-| 3003 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1，包含红色和绿色，rtp 帧间无间隔 |
-| 3010 | 播放 h264 格式文件 | app_tms_h264.c | testsrc 生成视频，带变化的数字           |
-| 4001 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 44.1k                             |
-| 4002 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 8k                                |
+| 号码 | 功能               | 代码           | 说明                                                                   |
+| ---- | ------------------ | -------------- | ---------------------------------------------------------------------- |
+| 1001 | 播放 alaw 格式文件 | app_tms_alaw.c |                                                                        |
+| 2001 | 播放 mp3 格式文件  | app_tms_mp3.c  |                                                                        |
+| 3001 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1                                                               |
+| 3002 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1，包含红色和绿色                                               |
+| 3003 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1，包含红色（5 秒）和绿色（5 秒），rtp 帧间无间隔               |
+| 3004 | 播放 h264 格式文件 | app_tms_h264.c | main/3.1，包含红色（2 秒）和绿色（8 秒），rtp 帧间无间隔               |
+| 3010 | 播放 h264 格式文件 | app_tms_h264.c | testsrc2 baseline-31 生成视频，带变化的数字，带插播                    |
+| 3011 | 播放 h264 格式文件 | app_tms_h264.c | testsrc2 baseline-31 生成视频，带变化的数字，不带插播                  |
+| 3012 | 播放 h264 格式文件 | app_tms_h264.c | testsrc2 high 生成视频，带变化的数字，带插播，手机 linphone 播放有问题 |
+| 3020 | 播放 h264 格式文件 | app_tms_h264.c | 红绿视频交替显示                                                       |
+| 4001 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 44.1k                                                           |
+| 4002 | 播放 mp4 格式文件  | app_tms_mp4.c  | 采样率 8k                                                              |
+| 4022 | 播放 mp4 格式文件  | app_tms_mp4.c  | 10 秒 testsrc2 视频，8 秒 sine 音频。                                  |
 
 因为 rtp 接收端音频采样率位 8k，如果输入的音频采样率高，会导致失真。
 
@@ -128,6 +133,10 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 红色 h264 文件，包括 I/P/B 帧，只有 1 个 I 帧
 
 > ffmpeg -t 10 -lavfi color=red color-red-10s.h264
+
+红色 h264 文件指定规格
+
+> ffmpeg -t 10 -lavfi color=red -c:v libx264 -profile:v baseline -level 3.1 color-red-baseline-31-10s.h264
 
 绿色 h264 文件，包括 I/P/B 帧，只有 1 个 I 帧
 
@@ -148,6 +157,20 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 指定音频采样率，生成 mp4 文件
 
 > ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi color=red sine-8k-red-10s.mp4
+
+> ffmpeg -t 1 -lavfi sine -ar 8000 -t 1 -lavfi color=red -c:v libx264 -profile:v baseline -level 31 sine-8k-red-1s.mp4
+
+> ffmpeg -t 1 -lavfi sine -ar 8000 -t 1 -lavfi color=green -c:v libx264 -profile:v baseline -level 31 sine-8k-green-1s.mp4
+
+> ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 31 sine-8k-testsrc2-10s.mp4
+
+> ffmpeg -t 1 -lavfi sine -ar 8000 -t 1 -lavfi color=red -c:v libx264 -profile:v baseline -level 31 sine-8k-red-1s.
+
+> ffmpeg -i color-red-1s.h264 -i sine-8k-green-1s.mp4 -filter_complex "[0:0][1:0][1:0][1:1] concat=n=2:v=1:a=1 [v] [a]" -map '[v]' -map '[a]' red-1s-sine-8k-green-1s.mp4
+
+> ffmpeg -i testsrc2-baseline-31-10s.h264 -itsoffset 1 -i sine-8k-10s.mp3 -map 0:v:0 -map 1:a:0 testsrc2-baseline-31-10s-sine-9s.mp4
+
+> ffmpeg -t 1 -lavfi anullsrc=r=8000:cl=mono -lavfi color=blue -c:v libx264 -profile:v baseline -level 3.1 anullsrc-blue-1s.mp4
 
 # ffprobe 命令
 
