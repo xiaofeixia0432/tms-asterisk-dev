@@ -22,4 +22,7 @@ chown -R ${ASTERISK_USER}: /var/log/asterisk \
                            /var/lib/asterisk \
                            /var/run/asterisk \
                            /var/spool/asterisk; \
+
+make && make install
+
 exec ${COMMAND}

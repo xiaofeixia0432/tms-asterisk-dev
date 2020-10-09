@@ -1,5 +1,7 @@
+node_modules
+.DS_Store
 conf/*.conf
 logs/
 media/
-.DS_Store
 docker-13/asterisk*/
+*.env

@@ -13,15 +13,23 @@ services:
       - ./conf/http.conf:/etc/asterisk/http.conf
       - ./conf/ari.conf:/etc/asterisk/ari.conf
       - ./conf/logger.conf:/etc/asterisk/logger.conf
+      - ./conf/manager.conf:/etc/asterisk/manager.conf
+      - ./conf/cdr.conf:/etc/asterisk/cdr.conf
+      - ./conf/cdr_manager.conf:/etc/asterisk/cdr_manager.conf
       - ./logs:/var/log/asterisk
       - ./media:/var/lib/asterisk/media
-      - ./tms-restart.sh:/usr/src/asterisk/tms-restart.sh
-      - ./tms-apps/app_tms.h:/usr/src/asterisk/apps/app_tms.h
+      - ./shell/tms-restart.sh:/usr/src/asterisk/tms-restart.sh
+      - ./tms-apps/tms_stream.h:/usr/src/asterisk/apps/tms_stream.h
+      - ./tms-apps/tms_rtp.h:/usr/src/asterisk/apps/tms_rtp.h
+      - ./tms-apps/tms_h264.h:/usr/src/asterisk/apps/tms_h264.h
+      - ./tms-apps/tms_pcma.h:/usr/src/asterisk/apps/tms_pcma.h
       - ./tms-apps/app_tms_alaw.c:/usr/src/asterisk/apps/app_tms_alaw.c
       - ./tms-apps/app_tms_mp3.c:/usr/src/asterisk/apps/app_tms_mp3.c
       - ./tms-apps/app_tms_h264.c:/usr/src/asterisk/apps/app_tms_h264.c
       - ./tms-apps/app_tms_mp4.c:/usr/src/asterisk/apps/app_tms_mp4.c
+      - ./tms-apps/app_tms_dtmf.c:/usr/src/asterisk/apps/app_tms_dtmf.c
     ports:
       - 8088:8088
+      - 5038:5038
       - 5060:5060/udp
       - 10000-10020:10000-10020/udp
