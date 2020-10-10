@@ -2,10 +2,10 @@
 type=transport
 protocol=udp
 bind=0.0.0.0
-external_media_address=填写宿主机地址
-external_signaling_address=填写宿主机地址
+external_media_address=填写实际地址
+external_signaling_address=填写实际地址
 
-9001]
+[9001]
 type=endpoint
 context=tms-playback
 disallow=all
