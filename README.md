@@ -1,6 +1,6 @@
 # 概述
 
-提供了 asterisk 的 docker 运行环境，内置了几个开发的 asterisk 应用，主要用于学习 asterisk。
+提供了 asterisk 的 docker 运行环境，内置了几个自己开发的 asterisk 应用，主要用于学习 asterisk。
 
 | 目录和文件            | 说明                                                          |
 | --------------------- | ------------------------------------------------------------- |
@@ -37,14 +37,6 @@ PACKAGE_URL ?= http://$(HOST_DOMAIN)/third-party/master/jansson/$(JANSSON_VERSIO
 PACKAGE_URL ?= http://$(HOST_DOMAIN)/third-party/master/pjproject/$(PJPROJECT_VERSION)
 ```
 
-如果需要安装`http-server`用于支持本地文件下载。
-
-> npm i http-server -g
-
-在`docker-13`目录下启动`http-server`。
-
-> http-server -p 80
-
 ## 引入 ffmpeg 动态链接库
 
 修改`docker-13/asterisk-13.33.0/main/Makefile`文件，引用`ffmpeg`库。
@@ -56,6 +48,14 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 ## 执行 docker-compose 命令
 
 生成 docker 镜像。
+
+如果需要，先安装`http-server`用于支持本地文件下载（用其它支持文件下载的服务也行）。
+
+> npm i http-server -g
+
+构建过程需要编译 asterisk 时（首次必须），在`docker-13`目录下启动`http-server`。
+
+> http-server -p 80
 
 > docker-compose -f docker-compose.13.yml build
 
@@ -91,6 +91,8 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 拨号计划。
 
+上下文`tms-playback`中定义了用于验证播放媒体文件的自定义应用。
+
 参考：https://wiki.asterisk.org/wiki/display/AST/Dialplan
 
 ## http.conf
@@ -123,7 +125,7 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 - 编译应用
 
-在`/usr/src/asterisk`目录下执行`make`和`make install`。
+在`/usr/src/asterisk`目录下执行`make`和`make install`。用 docker-compose 启动时会自动执行。
 
 # 应用（tms-apps 目录）
 
@@ -131,116 +133,132 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 ## 播放 alaw
 
-文件`app_tms_alaw.c`
+文件`app_tms_alaw.c`，不进行任何编解码工作，从文件中读取数据后直接通过 asterisk 发送。
 
-| 号码 | 说明                       | 样本文件                                                                 |
-| ---- | -------------------------- | ------------------------------------------------------------------------ |
-| 2001 | 8k 采样率，10s，裸流文件。 | ffmpeg -lavfi sine -t 10 -ar 8000 -f alaw -c:a pcm_alaw sine-8k-10s.alaw |
+| 号码 | 说明                       | 样本文件         |
+| ---- | -------------------------- | ---------------- |
+| 2001 | 8k 采样率，10s，裸流文件。 | sine-8k-10s.alaw |
+
+用 ffmpeg 生成样本文件
+
+> ffmpeg -lavfi sine -t 10 -ar 8000 -f alaw -c:a pcm_alaw sine-8k-10s.alaw
 
 ## 播放 mp3
 
-文件`app_tms_mp3.c`
+文件`app_tms_mp3.c`，用`ffmpeg`进行编解码（要求输入文件的采样率必须是`8k`，从高采样率进行重采样会有严重的失真），通过 asrterisk 发送。
 
-| 号码 | 说明                       | 样本文件                                                          |
-| ---- | -------------------------- | ----------------------------------------------------------------- |
-| 2002 | 8k 采样率，10s，mp3 格式。 | ffmpeg -lavfi sine -t 10 -ar 8000 -f mp3 -c:a mp3 sine-8k-10s.mp3 |
+| 号码 | 说明                       | 样本文件        |
+| ---- | -------------------------- | --------------- |
+| 2002 | 8k 采样率，10s，mp3 格式。 | sine-8k-10s.mp3 |
+
+用 ffmpeg 生成样本文件
+
+> ffmpeg -lavfi sine -t 10 -ar 8000 -f mp3 -c:a mp3 sine-8k-10s.mp3
 
 ## 播放 h264
 
-文件`app_tms_h264.c`
+文件`app_tms_h264.c`，用`ffmpeg`解码 h264 文件后通过 asterisk 发送。解码的速度很快，如果每读取一个包就立刻发送，客户端不能及时处理，所以需要添加时间间隔。应用第 2 个参数可以指定是否需要添加时间间隔，值为`tight`时不添加。虽然发送的快，但是时间戳和`dts`一致。
 
-| 号码 | 说明                                                                   | 样本文件                                         |
-| ---- | ---------------------------------------------------------------------- | ------------------------------------------------ |
-| 3001 | 10s，320x240，250 帧，main/3.1，包括 I/P/B 帧，只有 1 个 I 帧。        | color-red-10s.h264                               |
-| 3002 | main/3.1，包含红色（5 秒）和绿色（5 秒），rtp 帧间有间隔               | color-red-green-10s.h264                         |
-| 3003 | main/3.1，包含红色（5 秒）和绿色（5 秒），rtp 帧间无间隔               | color-red-green-10s.h264                         |
-| 3004 | main/3.1，包含红色（2 秒）和绿色（8 秒），rtp 帧间无间隔               | color-red-2s-green-8s.h264                       |
-| 3010 | testsrc2 baseline-31 生成视频，带变化的数字，带插播                    | color-red-1s.h264, testsrc2-baseline-31-10s.h264 |
-| 3011 | testsrc2 baseline-31 生成视频，带变化的数字，不带插播                  | testsrc2-baseline-31-10s.h264                    |
-| 3012 | testsrc2 high 生成视频，带变化的数字，带插播，手机 linphone 播放有问题 |
-| 3020 | 红绿视频交替显示                                                       | color-red-1s.h264,color-green-1s.h264            |
-| 3030 | gop 等于 10 的 h264 文件。                                             | testsrc2-gop10-10s.h264                          |
+用`linphone`作为客户端接收 h264 视频时，播放效果受编码格式的影响。例如：用 ffmpeg 生成默认规格的红色 h264 视频（3001），在 pc 端上可以正常播放，但是手机无法播放。这是因为生成的文件中只有 1 个 I 帧，如果这个帧如果`linphone`客户端不能正确处理，那么后续的帧都无法播放。为了验证这个问题，用 ffmpeg 分别生成时长为 1 秒的红色和绿色 h264 文件，红绿交叉共 6 个文件播放 6 秒（3002），完整播放应该看到红-绿-红-绿-红-绿，pc 上可以完整播放，手机上会频繁丢掉第 1 个红色。基于这个测试，是否可以通过在要播放的视频前添加一个引导视频解决前面的帧会丢失的问题？用 ffmpeg 生成一个画面变化（包含播放时间）的视频（3003），`linphone`在 pc 上可以播放，手机上大概率不能播放；在视频前添加 1 个时长 1 秒的视频（3004），在 pc 上可以看到两个视频，在手机上大概率只能看到 1 个视频。为了保证视频不因为丢失关键帧导致无法播放，可以在 ffmpeg 生成视频时指定`gop`大小，gop 就是两个 I 帧之间包含的帧数量，显然 gop 越小，包含的关键帧越多，但是文件也越大。用 ffmpeg 生成 1 个 gop 等于 10 的带播放时间的视频（3000），pc 和手机都可以正常播放。
+
+| 号码 | 说明                                                           | 样本文件                                        |
+| ---- | -------------------------------------------------------------- | ----------------------------------------------- |
+| 3000 | gop 等于 10 的 h264 文件。                                     | testsrc2-baseline31-gop10-10s.h264              |
+| 3001 | 10s，320x240，250 帧，main/31，包括 I/P/B 帧，只有 1 个 I 帧。 | color-red-10s.h264                              |
+| 3002 | 长度为 1 秒的红、绿视频各 3 个，baseline/31，交替显示。        | color-red-1s.h264,color-green-1s.h264           |
+| 3003 | testsrc2 baseline-31 生成视频，带变化的数字                    | testsrc2-baseline31-10s.h264                    |
+| 3004 | testsrc2 baseline-31 生成视频，带变化的数字，带引导视频        | color-red-1s.h264, testsrc2-baseline31-10s.h264 |
+
+读取 h264 文件的速度是远高于播放速度，如果读取了数据包就发送，那么客户端能正常处理吗？用 ffmpeg 制作一个 前 5 秒红色后 5 秒绿色的视频（3011），`linphone`可以正常播放。播放时设置为不添加时间间隔，读取后就发送（3012），但是要等到播放时长才挂断，只能看到红色，绿色视频丢失（猜测是发送的帧太多被`linphone`丢弃了）。用 ffmpeg 制作一个 前 2 秒红色后 8 秒绿色的视频（3013），读取后就发送，可以看到红色但是播放时间不足 2 秒，之后都是绿色，猜测是`linphone`的缓冲区满了，被后面的内容替换掉。从测试结果看，似乎`linphone`并不是按照时间戳控制视频的播放，而是按照收到的时间，因此必须在发送端控制发送的速率。
+
+| 号码 | 说明                                                    | 样本文件                   |
+| ---- | ------------------------------------------------------- | -------------------------- |
+| 3011 | main/31，包含红色（5 秒）和绿色（5 秒），rtp 帧间有间隔 | color-red-green-10s.h264   |
+| 3012 | main/31，包含红色（5 秒）和绿色（5 秒），rtp 帧间无间隔 | color-red-green-10s.h264   |
+| 3013 | main/31，包含红色（2 秒）和绿色（8 秒），rtp 帧间无间隔 | color-red-2s-green-8s.h264 |
+
+通过 ffmpeg 生成 h264 文件时可以通过`profile`和`level`两个参数指定规格，如果不指定默认的规格是`high/13`。生成带播放时间默认规格的文件（3021），`linphone`在 pc 端可以正常播放，在手机端无发播放；生成带播放时间默认规格 gop 等于 10 的文件（3022），pc 端和手机端都可以正常播放。
+
+| 号码 | 说明                                                            | 样本文件                |
+| ---- | --------------------------------------------------------------- | ----------------------- |
+| 3021 | testsrc2 high/13 生成视频，带变化的数字，带 2 个 1 秒的引导视频 | testsrc2-10s.h264       |
+| 3022 | testsrc2 high/13 生成视频，带变化的数字，带 2 个 1 秒的引导视频 | testsrc2-gop10-10s.h264 |
 
 用 ffmpeg 生成样本文件
 
-- 默认规格生成 red 和 green 两个 h264 文件。
+- 规格 main/31，单色，10s
 
-> ffmpeg -t 10 -lavfi color=red color-red-10s.h264
+> ffmpeg -t 10 -lavfi color=red -c:v libx264 -profile:v main -level 3.1 color-red-10s.h264
 
-> ffmpeg -t 10 -lavfi color=green color-green-10s.h264
+> ffmpeg -t 10 -lavfi color=green -c:v libx264 -profile:v main -level 3.1 color-green-10s.h264
 
-> ffmpeg -t 1 -lavfi color=red color-red-1s.h264
+- 规格 baseline/31，单色
 
-> ffmpeg -t 1 -lavfi color=green color-green-1s.h264
+> ffmpeg -t 1 -lavfi color=red -c:v libx264 -profile:v baseline -level 3.1 color-red-1s.h264
 
-- 默认规格生成 5 秒 red 然后 5 秒 green 的 h264 文件。
+> ffmpeg -t 1 -lavfi color=green -c:v libx264 -profile:v baseline -level 3.1 color-green-1s.h264
+
+- 规格 baseline/31，显示播放时间，10 秒
+
+> ffmpeg -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 3.1 testsrc2-baseline31-10s.h264
+
+- 规格 baseline/31，显示播放时间，gop 等于 10，10 秒
+
+> ffmpeg -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 3.1 -g 10 testsrc2-baseline31-gop10-10s.h264
+
+- 规格 main/31，5 秒红色+ 5 秒绿色
 
 > ffmpeg -t 5 -i color-red-10s.h264 -t 5 -i color-green-10s.h264 -filter_complex "[0:0][1:0] concat=n=2:v=1 [v]" -map '[v]' color-red-2s-green-8s.h264
 
-- 默认规格生成 2 秒 red 然后 8 秒 green 的 h264 文件。
+- 规格 main/31，2 秒红色+ 8 秒绿色
 
 > ffmpeg -t 2 -i color-red-10s.h264 -t 8 -i color-green-10s.h264 -filter_complex "[0:0][1:0] concat=n=2:v=1 [v]" -map '[v]' color-red-2s-green-8s.h264
 
-- 红色 h264 文件指定规格
+- 规格 baseline/31，10 秒，红色
 
-> ffmpeg -t 10 -lavfi color=red -c:v libx264 -profile:v baseline -level 3.1 color-red-baseline-31-10s.h264
+> ffmpeg -t 10 -lavfi color=red -c:v libx264 -profile:v baseline -level 3.1 color-red-baseline31-10s.h264
 
-- 指定规格数字变化的 h264 文件。
+- 规格 high/13，显示播放时间，10 秒
 
-> ffmpeg -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 3.1 testsrc2-baseline-31-10s.h264
+> ffmpeg -t 10 -lavfi testsrc2 testsrc2-10s.h264
 
-- 指定规格数字变化的 h264 文件，gop 等于 10。
+- 规格 high/13，显示播放时间，10 秒，gop 等于 10
 
-> ffmpeg -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 3.1 -g 10 testsrc2-gop10-10s.h264
+> ffmpeg -t 10 -lavfi testsrc2 -g 10 testsrc2-gop10-10s.h264
 
 ## 播放 mp4
 
-文件`app_tms_mp4.c`
+文件`app_tms_mp4.c`，用`ffmpeg`解码 mp4 文件后通过 asterisk 发送，音频会重采样为 8k。生成默认规格的 10 秒 mp4 文件（4001），播放没有问题，但是声音有严重的失真，这是因为默认的音频采样率是 44.1k，转为 8k 导致失真；将音频采样率指定为 8k（4002），再播就没有声音失真问题了。通常 mp4 文件中包含视频流和音频流，但是音频流和视频流不一定总是同步的，下面尝试几种音视频不同步的方式。mp4 文件中包含音频流，但是为静默音（4011），这样能够实现感觉上“不同步”；拼接媒体时，控制音频流完 2 秒开始（4012），产生真正的不同步（音频流的时长不变，只是延后 2 秒，因此视频流结束后，音频仍然会播放 2 秒）。
 
-| 号码 | 说明                                  | 样本文件                                    |
-| ---- | ------------------------------------- | ------------------------------------------- |
-| 4001 | 音频采样率 44.1k                      | sine-red-10s.mp4                            |
-| 4002 | 音频采样率 8k                         | sine-8k-red-10s.mp4                         |
-| 4020 | 多个 mp4 文件顺序播放。               | sine-8k-red-1s.mp4,sine-8k-green-1s.mp4     |
-| 4021 | 添加 1 个 1 秒的引导 mp4 文件。       | sine-8k-red-1s.mp4,sine-8k-testsrc2-10s.mp4 |
-| 4022 | 10 秒 testsrc2 视频，8 秒 sine 音频。 | testsrc2-baseline-31-10s-sine-8s.mp4        |
-| 4030 | 播放 gop 等于 10 的标准测试文件。     | sine-8k-testsrc2-gop10-10s.mp4              |
+| 号码 | 说明                                    | 样本文件                                     |
+| ---- | --------------------------------------- | -------------------------------------------- |
+| 4000 | baseline/31，gop 等于 10；音频采样率 8k | sine-8k-testsrc2-baseline31-gop10-10s.mp4    |
+| 4001 | 音频采样率 44.1k                        | sine-red-10s.mp4                             |
+| 4002 | 音频采样率 8k                           | sine-8k-red-10s.mp4                          |
+| 4011 | 1 秒，静默音，蓝色                      | anullsrc-blue-1s.mp4                         |
+| 4012 | 10 秒 testsrc2 视频，8 秒 sine 音频。   | testsrc2-baseline31-gop10-10s-sine-8k-8s.mp4 |
 
 用 ffmpeg 生成样本文件
 
-- 默认规格的 mp4 文件
+- 视频规格 high/13，红色；音频采样率 44.1k；10s
 
 > ffmpeg -t 10 -lavfi sine -t 10 -lavfi color=red sine-red-10s.mp4
 
-- 指定音频采样率，生成 mp4 文件
+- 视频规格 high/13，红色；音频采样率 8k；10s
 
 > ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi color=red sine-8k-red-10s.mp4
 
-- 指定音频采样率，指定视频规格，生成 mp4 文件
+- 视频规格 baseline/31，显示播放时间，gop 等于 10；音频采样率 8k 率；10 秒
 
-> ffmpeg -t 1 -lavfi sine -ar 8000 -t 1 -lavfi color=red -c:v libx264 -profile:v baseline -level 31 sine-8k-red-1s.mp4
+> ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 3.1 -g 10 sine-8k-testsrc2-baseline31-gop10-10s.mp4
 
-> ffmpeg -t 1 -lavfi sine -ar 8000 -t 1 -lavfi color=green -c:v libx264 -profile:v baseline -level 31 sine-8k-green-1s.mp4
-
-- 时间变化的视频
-
-> ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 31 sine-8k-testsrc2-10s.mp4
-
-- 时间延迟 2s 的 mp4
-
-> ffmpeg -i testsrc2-baseline-31-10s.h264 -itsoffset 2 -i sine-8k-10s.mp3 -map 0:v:0 -map 1:a:0 testsrc2-baseline-31-10s-sine-8s.mp4
-
-- 拼接媒体文件
-
-> ffmpeg -i color-red-1s.h264 -i sine-8k-green-1s.mp4 -filter_complex "[0:0][1:0][1:0][1:1] concat=n=2:v=1:a=1 [v] [a]" -map '[v]' -map '[a]' red-1s-sine-8k-green-1s.mp4
-
-- 控制 gop 的长度，解决丢帧不能稳定播放的问题
-
-> ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 3.1 -g 10 sine-8k-testsrc2-gop10-10s.mp4
-
-- 生成静默声音的 mp4 文件。
+- 视频规格 baseline/31，蓝色；音频采样率 8k，静默音，单声道；1s
 
 > ffmpeg -t 1 -lavfi anullsrc=r=8000:cl=mono -lavfi color=blue -c:v libx264 -profile:v baseline -level 3.1 anullsrc-blue-1s.mp4
+
+- 拼接 h264 和 mp3 文件；视频规格 baseline/31，显示播放时间，gop 等于 10，10 秒；音频延迟 2s，采样率 8k，8 秒
+
+> ffmpeg -i testsrc2-baseline31-gop10-10s.h264 -itsoffset 2 -i sine-8k-10s.mp3 -map 0:v:0 -map 1:a:0 -c:v libx264 -profile:v baseline -level 3.1 -g 10 testsrc2-baseline31-gop10-10s-sine-8k-8s.mp4
 
 ## 接收 dtmf
 
@@ -272,7 +290,7 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 - 音频延迟 2 秒播放
 
-ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -itsoffset 2 -i sine-8k-testsrc2-gop10-10s.mp4 -map 0:v:0 -map 1:a:0 -c:a pcm_alaw -vn -f rtp rtp://192.168.43.165:7078 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://192.168.43.165:7080
+> ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -itsoffset 2 -i sine-8k-testsrc2-gop10-10s.mp4 -map 0:v:0 -map 1:a:0 -c:a pcm_alaw -vn -f rtp rtp://192.168.43.165:7078 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://192.168.43.165:7080
 
 - 音频时间戳延后 1 秒
 
@@ -283,6 +301,10 @@ ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -itsoffset 2 -i sine-8k-testsrc2-go
 - 查看媒体文件基本信息
 
 > ffprobe sine-red-10s.mp4
+
+- 查看媒体文件的 stream 信息
+
+> ffprobe -show_streams sine-8k-red-10s.mp4
 
 - 查看媒体文件的 packet 并输出到文件
 

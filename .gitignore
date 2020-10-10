@@ -5,3 +5,4 @@ logs/
 media/
 docker-13/asterisk*/
 *.env
+*.pdf

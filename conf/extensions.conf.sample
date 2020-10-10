@@ -1,4 +1,4 @@
-[from-internal]
+[tms-playback]
 exten => 1001,1,NoOp()
   same =>      n,Answer()
   same = n,TMSAlawPlay(/var/lib/asterisk/media/sine-8k-10s.alaw)

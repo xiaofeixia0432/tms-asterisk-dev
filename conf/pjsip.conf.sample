@@ -7,7 +7,7 @@ external_signaling_address=填写宿主机地址
 
 9001]
 type=endpoint
-context=from-internal
+context=tms-playback
 disallow=all
 allow=alaw,h264
 auth=9001
@@ -27,7 +27,7 @@ remove_existing=yes
 
 [9002]
 type=endpoint
-context=from-internal
+context=tms-playback
 disallow=all
 allow=alaw,h264
 auth=9002
@@ -47,7 +47,7 @@ remove_existing=no
 
 [9003]
 type=endpoint
-context=from-internal
+context=tms-playback
 disallow=all
 allow=alaw,h264
 auth=9003
