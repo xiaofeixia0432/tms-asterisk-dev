@@ -233,11 +233,11 @@ int tms_init_pcma_frame(PCMAEnc *encoder, Resampler *resampler)
 void tms_add_audio_frame_send_delay(AVFrame *frame, TmsPlayerContext *player)
 {
   int64_t pts = av_rescale(frame->pts, AV_TIME_BASE, frame->sample_rate);
-  int64_t now = av_gettime_relative() - player->start_time_us;
-  ast_debug(1, "计算音频帧 #%d 发送延时 now = %ld pts = %ld delay = %ld\n", player->nb_audio_frames, now, pts, pts - now);
-  if (pts > now)
+  int64_t elapse = av_gettime_relative() - player->start_time_us - player->pause_duration_us;
+  ast_debug(1, "计算音频帧 #%d 发送延时 elapse = %ld pts = %ld delay = %ld\n", player->nb_audio_frames, elapse, pts, pts - elapse);
+  if (pts > elapse)
   {
-    usleep(pts - now);
+    usleep(pts - elapse);
   }
 }
 

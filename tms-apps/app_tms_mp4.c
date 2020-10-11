@@ -249,7 +249,7 @@ static int tms_handle_video_packet(TmsPlayerContext *player, TmsInputStream *ist
 
   /* 添加发送间隔 */
   int64_t dts = ist->dts;
-  int64_t elapse = av_gettime_relative() - player->start_time_us;
+  int64_t elapse = av_gettime_relative() - player->start_time_us - player->pause_duration_us;
   if (dts > elapse)
     usleep(dts - elapse);
 
@@ -365,11 +365,57 @@ static int tms_handle_audio_packet(TmsPlayerContext *player, TmsInputStream *ist
   return 0;
 }
 /**
+ * 等恢复播放 
+ */
+static int tms_wait_resume(struct ast_channel *chan, char *resumedtmfs, int64_t *pause_duration_us, int *stop)
+{
+  int64_t start = av_gettime_relative();
+  int ms = -1;
+
+  while (1)
+  {
+    ms = ast_waitfor(chan, ms);
+    if (ms < 0)
+    {
+      ast_debug(1, "Hangup detected\n");
+      *stop = 1;
+      break;
+    }
+    if (ms)
+    {
+      struct ast_frame *f = ast_read(chan);
+      if (!f)
+      {
+        ast_debug(1, "Null frame == hangup() detected\n");
+        *stop = 1;
+        break;
+      }
+      /* 如果是dtmf，检查是否需要处理按键控制逻辑 */
+      if (f->frametype == AST_FRAME_DTMF)
+      {
+        char key[2] = {(char)f->subclass.integer, '\0'};
+        ast_debug(2, "等待恢复，收到DTMF：key=%s\n", key);
+        /* 恢复播放 */
+        if (!ast_strlen_zero(resumedtmfs) && strchr(resumedtmfs, key[0]))
+        {
+          break;
+        }
+      }
+      ast_frfree(f);
+    }
+  }
+
+  *pause_duration_us += (av_gettime_relative() - start);
+
+  return 0;
+}
+/**
  * 播放指定的mp4文件
  */
-static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, int max_playing_ms, char *stopdtmfs)
+static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, int max_playing_ms, char *stopdtmfs, char *pausedtmfs, char *resumedtmfs, int64_t *out_pause_duration_us)
 {
   int ret = 0;
+  int pause = 0; // 暂停状态
   int ms = -1;
 
   TmsInputStream *ists[2]; // 记录媒体流信息
@@ -468,14 +514,19 @@ static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, in
       if (f->frametype == AST_FRAME_DTMF)
       {
         char key[2] = {(char)f->subclass.integer, '\0'};
-        ast_debug(2, "收到DTMF：key=%s\n", key);
+        ast_debug(2, "收到DTMF(%s)，检查是否需要播放控制\n", key);
         /* 停止播放 */
         if (!ast_strlen_zero(stopdtmfs) && strchr(stopdtmfs, key[0]))
         {
           pbx_builtin_setvar_helper(chan, "TMSDTMFKEY", key);
           ast_frfree(f);
           *stop = 1;
-          goto clean;
+          goto end;
+        }
+        /* 停止播放 */
+        else if (!ast_strlen_zero(pausedtmfs) && strchr(pausedtmfs, key[0]))
+        {
+          pause = 1;
         }
       }
       ast_frfree(f);
@@ -485,15 +536,31 @@ static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, in
      */
     if (max_playing_ms > 0)
     {
-      if (ast_remaining_ms(tvstart, max_playing_ms) <= 0)
+      if (ast_remaining_ms(tvstart, max_playing_ms + (player.pause_duration_us / 1000)) <= 0)
       {
         ast_debug(1, "播放超时，结束本次播放 %s\n", filename);
         *stop = 1;
-        goto clean;
+        goto end;
       }
+    }
+    /**
+     * 是否进入暂停状态
+     */
+    if (pause)
+    {
+      tms_wait_resume(chan, resumedtmfs, &player.pause_duration_us, stop);
+      if (*stop)
+        goto end;
+
+      ast_debug(2, "暂停播放 %ld 微秒\n", player.pause_duration_us);
+
+      pause = 0;
+      if (out_pause_duration_us)
+        *out_pause_duration_us = player.pause_duration_us;
     }
   }
 
+end:
   /* Log end */
   ast_debug(1, "完成文件播放 %s，共读取 %d 个包，包含：%d 个视频包，%d 个音频包，用时：%ld微秒\n", filename, player.nb_packets, player.nb_video_packets, player.nb_audio_packets, player.end_time_us - player.start_time_us);
 
@@ -525,13 +592,13 @@ static int mp4_exec(struct ast_channel *chan, const char *data)
 {
   struct ast_module_user *u = NULL;
 
-  char *filename;          // 要打开的文件
-  char *stopdtmfs;         // 停止播放的按键
-  int repeat = 0;          // 重复播放的次数，等于0不重复，共播放1+repeat次
-  int max_duration_ms = 0; // 播放总时长，单位毫秒
-  int remaining_ms = 0;    // 剩余播放时长，单位毫秒
-  int nb_play_times = 0;   // 已经播放的次数
-  int stop = 0;            // 是否停止播放
+  char *filename;                             // 要打开的文件
+  char *stopdtmfs, *pausedtmfs, *resumedtmfs; // 控制播放的按键，停止，暂停，恢复
+  int repeat = 0;                             // 重复播放的次数，等于0不重复，共播放1+repeat次
+  int max_duration_ms = 0;                    // 播放总时长，单位毫秒
+  int remaining_ms = 0;                       // 剩余播放时长，单位毫秒
+  int nb_play_times = 0;                      // 已经播放的次数
+  int stop = 0;                               // 是否停止播放
 
   char *parse;
 
@@ -540,7 +607,9 @@ static int mp4_exec(struct ast_channel *chan, const char *data)
       AST_APP_ARG(filename);
       AST_APP_ARG(repeat);
       AST_APP_ARG(duration);
-      AST_APP_ARG(stopdtmfs););
+      AST_APP_ARG(stopdtmfs);
+      AST_APP_ARG(pausedtmfs);
+      AST_APP_ARG(resumedtmfs););
 
   ast_debug(1, "进入TMSMp4Play(%s)\n", data);
 
@@ -556,6 +625,8 @@ static int mp4_exec(struct ast_channel *chan, const char *data)
   /* 处理传入的参数 */
   filename = args.filename;
   stopdtmfs = args.stopdtmfs;
+  pausedtmfs = args.pausedtmfs;
+  resumedtmfs = args.resumedtmfs;
 
   if (!ast_strlen_zero(args.repeat))
   {
@@ -583,12 +654,14 @@ static int mp4_exec(struct ast_channel *chan, const char *data)
       }
       else
       {
-        mp4_play_once(chan, filename, &stop, remaining_ms, stopdtmfs);
+        int64_t pause_duration_us = 0; // 暂停播放时长
+        mp4_play_once(chan, filename, &stop, remaining_ms, stopdtmfs, pausedtmfs, resumedtmfs, &pause_duration_us);
+        max_duration_ms += (pause_duration_us / 1000);
       }
     }
     else
     {
-      mp4_play_once(chan, filename, &stop, 0, stopdtmfs);
+      mp4_play_once(chan, filename, &stop, 0, stopdtmfs, pausedtmfs, resumedtmfs, NULL);
     }
 
     if (stop)

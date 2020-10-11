@@ -268,12 +268,13 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 > ffmpeg -i testsrc2-baseline31-gop10-10s.h264 -itsoffset 2 -i sine-8k-10s.mp3 -map 0:v:0 -map 1:a:0 -c:v libx264 -profile:v baseline -level 3.1 -g 10 testsrc2-baseline31-gop10-10s-sine-8k-8s.mp4
 
-播放控制功能。
+播放控制功能。支持通过`dtmf`控制停止，暂停和恢复播放；支持设置重播次数和播放总时长（暂停时间不计入播放时长）。
 
-| 号码 | 说明                               | 样本文件                                  |
-| ---- | ---------------------------------- | ----------------------------------------- |
-| 4021 | 重复播放 3 遍，按`0`键退出。       | sine-8k-testsrc2-baseline31-gop10-10s.mp4 |
-| 4022 | 播放 5 秒，超时退出；按`0`键退出。 | sine-8k-testsrc2-baseline31-gop10-10s.mp4 |
+| 号码 | 说明                                                     | 样本文件                                  |
+| ---- | -------------------------------------------------------- | ----------------------------------------- |
+| 4021 | 按`0`键退出，按`1`暂停，按`2`恢复。                      | sine-8k-testsrc2-baseline31-gop10-10s.mp4 |
+| 4022 | 重复播放 3 遍，按`0`键退出，按`1`暂停，按`2`恢复。       | sine-8k-testsrc2-baseline31-gop10-10s.mp4 |
+| 4023 | 播放 5 秒，超时退出；按`0`键退出，按`1`暂停，按`2`恢复。 | sine-8k-testsrc2-baseline31-gop10-10s.mp4 |
 
 ## 接收 dtmf
 
@@ -361,9 +362,11 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 | TMSH264Play | 播放 h264 裸流文件。 | app_tms_h264.c |
 | TMSMp4Play  | 播放 mp4 文件。      | app_tms_mp4.c  |
 
-| 参数     | 说明                                        | 必填 |
-| -------- | ------------------------------------------- | ---- |
-| filename | 要播放的文件                                | 是   |
-| repeat   | 重复播放的次数。小于等于 0 或不指定不重复。 | 否   |
-| duration | 播放总时长，单位秒，支持小数                | 否   |
-| stop     | 停止播放的按键                              | 否   |
+| 参数     | 说明                                          | 必填 |
+| -------- | --------------------------------------------- | ---- |
+| filename | 要播放的文件                                  | 是   |
+| repeat   | 重复播放的次数。小于等于 0 或不指定不重复。   | 否   |
+| duration | 播放总时长，单位秒，支持小数                  | 否   |
+| stop     | 停止播放的按键。支持指定多个按键，例如：0&9。 | 否   |
+| pause    | 暂停播放的按键                                | 否   |
+| resume   | 恢复播放的按键                                | 否   |

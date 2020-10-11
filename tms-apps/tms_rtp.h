@@ -19,9 +19,11 @@
 typedef struct TmsPlayerContext
 {
   struct ast_channel *chan;
+  /* 时间 */
+  int64_t start_time_us;     // 微秒
+  int64_t end_time_us;       // 微秒
+  int64_t pause_duration_us; // 微秒
   /* 计数器 */
-  int64_t start_time_us; // 微秒
-  int64_t end_time_us;   // 微秒
   int nb_packets;
   int nb_video_packets;
   int nb_video_rtps;
@@ -238,6 +240,8 @@ int tms_init_player_context(struct ast_channel *chan, TmsPlayerContext *player)
 {
   player->chan = chan;
   player->start_time_us = av_gettime_relative(); // 单位是微秒
+  player->end_time_us = 0;
+  player->pause_duration_us = 0;
   player->nb_packets = 0;
   player->nb_video_packets = 0;
   player->nb_video_rtps = 0;
