@@ -228,17 +228,14 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 ## 播放 mp4
 
-文件`app_tms_mp4.c`，用`ffmpeg`解码 mp4 文件后通过 asterisk 发送，音频会重采样为 8k。生成默认规格的 10 秒 mp4 文件（4001），播放没有问题，但是声音有严重的失真，这是因为默认的音频采样率是 44.1k，转为 8k 导致失真；将音频采样率指定为 8k（4002），再播就没有声音失真问题了。通常 mp4 文件中包含视频流和音频流，但是音频流和视频流不一定总是同步的，下面尝试几种音视频不同步的方式。mp4 文件中包含音频流，但是为静默音（4011），这样能够实现感觉上“不同步”；拼接媒体时，控制音频流完 2 秒开始（4012），产生真正的不同步（音频流的时长不变，只是延后 2 秒，因此视频流结束后，音频仍然会播放 2 秒）。
+文件`app_tms_mp4.c`，用`ffmpeg`解码 mp4 文件后通过 asterisk 发送，音频会重采样为 8k。生成默认规格的 10 秒 mp4 文件（4001），播放没有问题，但是声音有严重的失真，这是因为默认的音频采样率是 44.1k，转为 8k 导致失真；将音频采样率指定为 8k（4002），再播就没有声音失真问题了。
 
-| 号码 | 说明                                    | 样本文件                                     |
-| ---- | --------------------------------------- | -------------------------------------------- |
-| 4000 | baseline/31，gop 等于 10；音频采样率 8k | sine-8k-testsrc2-baseline31-gop10-10s.mp4    |
-| 4001 | 音频采样率 44.1k                        | sine-red-10s.mp4                             |
-| 4002 | 音频采样率 8k                           | sine-8k-red-10s.mp4                          |
-| 4011 | 1 秒，静默音，蓝色                      | anullsrc-blue-1s.mp4                         |
-| 4012 | 10 秒 testsrc2 视频，8 秒 sine 音频。   | testsrc2-baseline31-gop10-10s-sine-8k-8s.mp4 |
-
-用 ffmpeg 生成样本文件
+| 号码 | 说明                                      | 样本文件                                          |
+| ---- | ----------------------------------------- | ------------------------------------------------- |
+| 4000 | baseline/31，gop 等于 10；音频采样率 8k。 | sine-8k-testsrc2-baseline31-gop10-10s.mp4         |
+| 4001 | 音频采样率 44.1k                          | sine-red-10s.mp4                                  |
+| 4002 | 音频采样率 8k                             | sine-8k-red-10s.mp4                               |
+| 4003 | 播放 9:16 竖屏。                          | sine-8k-testsrc2-baseline31-gop10-10s-360x640.mp4 |
 
 - 视频规格 high/13，红色；音频采样率 44.1k；10s
 
@@ -252,6 +249,17 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 > ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi testsrc2 -c:v libx264 -profile:v baseline -level 3.1 -g 10 sine-8k-testsrc2-baseline31-gop10-10s.mp4
 
+- 设置图像的分辨率和显示比例
+
+> ffmpeg -t 10 -lavfi sine -ar 8000 -t 10 -lavfi testsrc2 -aspect 360:640 -c:v libx264 -profile:v baseline -level 3.1 -g 10 -s 360x640 sine-8k-testsrc2-baseline31-gop10-10s-360x640.mp4
+
+通常 mp4 文件中包含视频流和音频流，但是音频流和视频流不一定总是同步的，下面尝试几种音视频不同步的方式。mp4 文件中包含音频流，但是为静默音（4011），这样能够实现感觉上“不同步”；拼接媒体时，控制音频流完 2 秒开始（4012），产生真正的不同步（音频流的时长不变，只是延后 2 秒，因此视频流结束后，音频仍然会播放 2 秒）。
+
+| 号码 | 说明                                  | 样本文件                                     |
+| ---- | ------------------------------------- | -------------------------------------------- |
+| 4011 | 1 秒，静默音，蓝色                    | anullsrc-blue-1s.mp4                         |
+| 4012 | 10 秒 testsrc2 视频，8 秒 sine 音频。 | testsrc2-baseline31-gop10-10s-sine-8k-8s.mp4 |
+
 - 视频规格 baseline/31，蓝色；音频采样率 8k，静默音，单声道；1s
 
 > ffmpeg -t 1 -lavfi anullsrc=r=8000:cl=mono -lavfi color=blue -c:v libx264 -profile:v baseline -level 3.1 anullsrc-blue-1s.mp4
@@ -259,6 +267,13 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 - 拼接 h264 和 mp3 文件；视频规格 baseline/31，显示播放时间，gop 等于 10，10 秒；音频延迟 2s，采样率 8k，8 秒
 
 > ffmpeg -i testsrc2-baseline31-gop10-10s.h264 -itsoffset 2 -i sine-8k-10s.mp3 -map 0:v:0 -map 1:a:0 -c:v libx264 -profile:v baseline -level 3.1 -g 10 testsrc2-baseline31-gop10-10s-sine-8k-8s.mp4
+
+播放控制功能。
+
+| 号码 | 说明                               | 样本文件                                  |
+| ---- | ---------------------------------- | ----------------------------------------- |
+| 4021 | 重复播放 3 遍，按`0`键退出。       | sine-8k-testsrc2-baseline31-gop10-10s.mp4 |
+| 4022 | 播放 5 秒，超时退出；按`0`键退出。 | sine-8k-testsrc2-baseline31-gop10-10s.mp4 |
 
 ## 接收 dtmf
 
@@ -273,6 +288,28 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 目录`tms-ami`下
 
 # ARI 接口
+
+通过实现`视频IVR`演示`ARI`接口的使用。
+
+## 制作数据
+
+用图像生成首页视频
+
+> ffmpeg -f image2 -stream_loop 250 -i home.png -pix_fmt yuv420p -s 320x240 -c:v libx264 -profile:v baseline -level 3.1 -g 10 home.mp4
+
+用图片生成 1 级视频
+
+> ffmpeg -f image2 -stream_loop 250 -i red.png -pix_fmt yuv420p -s 320x240 -c:v libx264 -profile:v baseline -level 3.1 -g 10 1_1.mp4
+
+> ffmpeg -f image2 -stream_loop 250 -i green.png -pix_fmt yuv420p -s 320x240 -c:v libx264 -profile:v baseline -level 3.1 -g 10 1_2.mp4
+
+> ffmpeg -f image2 -stream_loop 250 -i blue.png -pix_fmt yuv420p -s 320x240 -c:v libx264 -profile:v baseline -level 3.1 -g 10 1_3.mp4
+
+## 在`dialplan`中实现
+
+6010
+
+## 用`ari`实现
 
 目录`tms-ari`下
 
@@ -313,3 +350,20 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 - 查看媒体文件的 frame 并输出到文件
 
 > ffprobe -show_frames color-red-10s.h264 > frames.txt
+
+# 应用说明
+
+| 应用        | 说明                 | 代码           |
+| ----------- | -------------------- | -------------- |
+| TMSArgs     | 演示处理输入参数。   | app_tms_args.c |
+| TMSAlawPlay | 播放 alaw 裸流文件。 | app_tms_alaw.c |
+| TMSMp3Play  | 播放 mp3 文件。      | app_tms_mp3.c  |
+| TMSH264Play | 播放 h264 裸流文件。 | app_tms_h264.c |
+| TMSMp4Play  | 播放 mp4 文件。      | app_tms_mp4.c  |
+
+| 参数     | 说明                         | 必填 |
+| -------- | ---------------------------- | ---- |
+| filename | 要播放的文件                 | 是   |
+| repeat   | 重复播放的次数               | 否   |
+| duration | 播放总时长，单位秒，支持小数 | 否   |
+| stop     | 停止播放的按键               | 否   |

@@ -60,31 +60,15 @@
 
 static const char *app_play = "TMSMp4Play";
 static const char *syn_play = "MP4 file playblack";
-static const char *des_play = "  TMSMp4Play(filename,[options]):  Play mp4 file to user. \n";
+static const char *des_play = "  TMSMp4Play(filename,[stopkeys]):  Play mp4 file to user. \n";
 
 /**
- * 播放mp4文件应用主程序
+ * 播放指定的mp4文件
  */
-static int mp4_play(struct ast_channel *chan, const char *data)
+static int mp4_play_once(struct ast_channel *chan, char *filename, char *stopkeys, int remaining_ms, int *stop)
 {
-  struct ast_module_user *u = NULL;
-
-  char *filename; // 要打开的文件
-  int ret = 0;    // 返回结果
-  char *parse;
-
-  AST_DECLARE_APP_ARGS(args, AST_APP_ARG(filename); AST_APP_ARG(options););
-
-  ast_debug(1, "TMSMp4Play %s\n", (char *)data);
-
-  /* Lock module */
-  u = ast_module_user_add(chan);
-
-  /* Duplicate input */
-  parse = ast_strdup(data);
-
-  /* Get input data */
-  AST_STANDARD_APP_ARGS(args, parse);
+  int ret = 0;
+  int ms = -1;
 
   // 记录媒体流信息
   TmsInputStream *ists[2];
@@ -100,12 +84,11 @@ static int mp4_play(struct ast_channel *chan, const char *data)
 
   AVFormatContext *ictx = NULL;
 
-  filename = (char *)args.filename;
-
   /* 打开指定的媒体文件 */
   if ((ret = avformat_open_input(&ictx, filename, NULL, NULL)) < 0)
   {
     ast_log(LOG_WARNING, "无法打开媒体文件 %s\n", filename);
+    *stop = 1;
     goto clean;
   }
 
@@ -113,6 +96,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
   if ((ret = avformat_find_stream_info(ictx, NULL)) < 0)
   {
     ast_log(LOG_WARNING, "无法获取媒体文件信息 %s\n", filename);
+    *stop = 1;
     goto clean;
   }
 
@@ -149,11 +133,13 @@ static int mp4_play(struct ast_channel *chan, const char *data)
     {
       if ((ret = tms_init_pcma_encoder(&pcma_enc)) < 0)
       {
+        *stop = 1;
         goto clean;
       }
       /* 设置重采样，将解码出的fltp采样格式，转换为s16采样格式 */
       if ((ret = tms_init_audio_resampler(ist->dec_ctx, pcma_enc.cctx, &resampler)) < 0)
       {
+        *stop = 1;
         goto clean;
       }
     }
@@ -162,13 +148,13 @@ static int mp4_play(struct ast_channel *chan, const char *data)
   /**
    * 应用有可能在一个dialplan中多次调用，实现多个文件的连续播放，因此，应该用当前时间保证多个应用间的时间戳是连续增长的，否则可以指定为任意值
    */
-  struct timeval now = ast_tvnow();                                  // tv_sec 有10位，tv_usec 有6位
-  uint64_t base_timestamp = now.tv_sec * AV_TIME_BASE + now.tv_usec; // 单位是微秒
+  struct timeval tvstart = ast_tvnow();                                      // tv_sec 有10位，tv_usec 有6位
+  uint64_t base_timestamp = tvstart.tv_sec * AV_TIME_BASE + tvstart.tv_usec; // 单位是微秒
   uint32_t rtp_base_timestamp = base_timestamp;
   video_rtp_ctx.cur_timestamp = 0;
   video_rtp_ctx.base_timestamp = audio_rtp_ctx.cur_timestamp = rtp_base_timestamp;
 
-  ast_debug(1, "now.tv_sec = %ld now.tv_usec = %ld base_timestamp = %ld rtp_base_timestamp = %u\n", (uint64_t)now.tv_sec, (uint64_t)now.tv_usec, base_timestamp, rtp_base_timestamp);
+  ast_debug(1, "tvstart.tv_sec = %ld tvstart.tv_usec = %ld base_timestamp = %ld rtp_base_timestamp = %u\n", (uint64_t)tvstart.tv_sec, (uint64_t)tvstart.tv_usec, base_timestamp, rtp_base_timestamp);
 
   TmsPlayerContext player = {
       .chan = chan,
@@ -183,10 +169,12 @@ static int mp4_play(struct ast_channel *chan, const char *data)
 
   if ((ret = tms_ast_channel_get_rtp_dest(chan, &player.rtp_audio_dest_addr, &player.rtp_video_dest_addr)) < 0)
   {
+    *stop = 1;
     goto clean;
   }
   if ((ret = tms_ast_channel_get_rtp_ssrc(chan, &player.rtp_audio_ssrc, &player.rtp_video_ssrc)) < 0)
   {
+    *stop = 1;
     goto clean;
   }
   ast_debug(1, "音频 RTP 地址 %s:%d，视频 RTP 地址 %s:%d，音频 ssrc %d，视频 ssrc %d\n", ast_inet_ntoa(player.rtp_audio_dest_addr.sin_addr), ntohs(player.rtp_audio_dest_addr.sin_port), ast_inet_ntoa(player.rtp_video_dest_addr.sin_addr), ntohs(player.rtp_video_dest_addr.sin_port), player.rtp_audio_ssrc, player.rtp_video_ssrc);
@@ -205,6 +193,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
     else if (ret < 0)
     {
       ast_log(LOG_WARNING, "读取媒体包 #%d 失败 %s\n", player.nb_packets, av_err2str(ret));
+      *stop = 1;
       goto clean;
     }
 
@@ -216,6 +205,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
       if ((ret = av_bsf_send_packet(h264bsfc, pkt)) < 0)
       {
         ast_log(LOG_ERROR, "av_bsf_send_packet error");
+        *stop = 1;
         goto clean;
       }
       while ((ret = av_bsf_receive_packet(h264bsfc, pkt)) == 0)
@@ -261,6 +251,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
         if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
         {
           ast_log(LOG_ERROR, "建立socket失败\n");
+          *stop = 1;
           goto clean;
         }
         struct sockaddr_in rtcp_addr = player.rtp_video_dest_addr;
@@ -285,6 +276,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
       if ((ret = avcodec_send_packet(ist->dec_ctx, pkt)) < 0)
       {
         ast_log(LOG_WARNING, "读取音频包 #%d 失败 %s\n", player.nb_audio_packets, av_err2str(ret));
+        *stop = 1;
         goto clean;
       }
       int nb_packet_frames = 0;
@@ -305,6 +297,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
         else if (ret < 0)
         {
           ast_log(LOG_WARNING, "读取音频帧 #%d 错误 %s\n", player.nb_audio_frames + 1, av_err2str(ret));
+          *stop = 1;
           goto clean;
         }
         nb_packet_frames++;
@@ -318,12 +311,14 @@ static int mp4_play(struct ast_channel *chan, const char *data)
         ret = tms_audio_resample(&resampler, frame, &pcma_enc);
         if (ret < 0)
         {
+          *stop = 1;
           goto clean;
         }
         /* 重采样后的媒体帧 */
         ret = tms_init_pcma_frame(&pcma_enc, &resampler);
         if (ret < 0)
         {
+          *stop = 1;
           goto clean;
         }
         player.nb_pcma_frames++;
@@ -332,6 +327,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
         if ((ret = avcodec_send_frame(pcma_enc.cctx, pcma_enc.frame)) < 0)
         {
           ast_log(LOG_ERROR, "音频帧发送编码器错误\n");
+          *stop = 1;
           goto clean;
         }
 
@@ -348,6 +344,7 @@ static int mp4_play(struct ast_channel *chan, const char *data)
           else if (ret < 0)
           {
             ast_log(LOG_ERROR, "Error encoding audio frame\n");
+            *stop = 1;
             goto clean;
           }
           /* 计算时间戳，单位毫秒（milliseconds） a*b/c */
@@ -384,12 +381,59 @@ static int mp4_play(struct ast_channel *chan, const char *data)
     }
 
     av_packet_unref(pkt);
+
+    /* 解决挂机后数据清理问题 */
+    ms = ast_waitfor(chan, ms);
+    if (ms < 0)
+    {
+      ast_debug(1, "Hangup detected\n");
+      *stop = 1;
+      goto clean;
+    }
+    if (ms)
+    {
+      /* 检查是否需要结束 */
+      if (!ast_strlen_zero(stopkeys))
+      {
+        struct ast_frame *f = ast_read(chan);
+        if (!f)
+        {
+          ast_debug(1, "Null frame == hangup() detected\n");
+          *stop = 1;
+          goto clean;
+        }
+        if (f->frametype == AST_FRAME_DTMF)
+        {
+          char key[2] = {(char)f->subclass.integer, '\0'};
+          ast_debug(1, "收到DTMF：key=%s\n", key);
+          if (strchr(stopkeys, key[0]))
+          {
+            pbx_builtin_setvar_helper(chan, "TMSDTMFKEY", key);
+            ast_frfree(f);
+            *stop = 1;
+            goto clean;
+          }
+          ast_frfree(f);
+        }
+        ast_frfree(f);
+      }
+    }
+    /* 检查是否已经超时 */
+    if (remaining_ms > 0)
+    {
+      if (ast_remaining_ms(tvstart, remaining_ms) <= 0)
+      {
+        ast_debug(1, "播放超时，结束本次播放 %s\n", filename);
+        *stop = 1;
+        goto clean;
+      }
+    }
   }
 
   ast_debug(1, "共读取 %d 个包，包含：%d 个视频包，%d 个音频包，用时：%ld微秒\n", player.nb_packets, player.nb_video_packets, player.nb_audio_packets, player.end_time - player.start_time);
 
   /* Log end */
-  ast_log(LOG_DEBUG, "结束mp4play\n");
+  ast_debug(1, "完成1次播放 %s\n", filename);
 
 clean:
   if (frame)
@@ -407,12 +451,101 @@ clean:
   if (ictx)
     avformat_close_input(&ictx);
 
+  return ret;
+}
+/**
+ * 播放mp4文件应用主程序
+ */
+static int mp4_exec(struct ast_channel *chan, const char *data)
+{
+  struct ast_module_user *u = NULL;
+
+  char *filename;          // 要打开的文件
+  char *stopkeys;          // 停止播放的按键
+  int repeat = 0;          // 重复播放的次数，等于0不重复，共播放1+repeat次
+  int max_duration_ms = 0; // 播放总时长，单位毫秒
+  int remaining_ms = 0;    // 等待播放时长，单位毫秒
+  int nb_play_times = 0;   // 已经播放的次数
+  int stop = 0;            // 是否停止播放
+
+  char *parse;
+
+  AST_DECLARE_APP_ARGS(
+      args,
+      AST_APP_ARG(filename);
+      AST_APP_ARG(repeat);
+      AST_APP_ARG(duration);
+      AST_APP_ARG(stopkeys););
+
+  ast_debug(1, "进入TMSMp4Play(%s)\n", data);
+
+  /* Lock module */
+  u = ast_module_user_add(chan);
+
+  /* Duplicate input */
+  parse = ast_strdup(data);
+
+  /* Get input data */
+  AST_STANDARD_APP_ARGS(args, parse);
+
+  filename = args.filename;
+  stopkeys = args.stopkeys;
+
+  if (!ast_strlen_zero(args.repeat))
+  {
+    repeat = atoi(args.repeat);
+    if (repeat < 0)
+      repeat = 0;
+  }
+  if (!ast_strlen_zero(args.duration))
+  {
+    max_duration_ms = atof(args.duration);
+    if (max_duration_ms <= 0)
+      max_duration_ms = 0;
+    else
+      max_duration_ms = max_duration_ms * 1000.0;
+  }
+
+  struct timeval tvstart = ast_tvnow(); // 开始播放时间
+
+  while (nb_play_times < repeat + 1)
+  {
+    if (max_duration_ms > 0)
+    {
+      /* 检查播放时间限制 */
+      remaining_ms = ast_remaining_ms(tvstart, max_duration_ms);
+      if (remaining_ms <= 0)
+      {
+        ast_log(LOG_DEBUG, "播放超时，结束播放 %s\n", data);
+        break;
+      }
+      else
+      {
+        mp4_play_once(chan, filename, stopkeys, remaining_ms, &stop);
+      }
+    }
+    else
+    {
+      mp4_play_once(chan, filename, stopkeys, 0, &stop);
+    }
+
+    if (stop)
+    {
+      ast_log(LOG_DEBUG, "停止播放 %s\n", data);
+      break;
+    }
+
+    nb_play_times++;
+  }
+
   /* Unlock module*/
   ast_module_user_remove(u);
 
+  /* 释放资源 */
   free(parse);
 
-  /* Exit */
+  ast_log(LOG_DEBUG, "退出TMSMp4Play(%s)\n", data);
+
   return 0;
 }
 
@@ -427,7 +560,7 @@ static int unload_module(void)
 
 static int load_module(void)
 {
-  int res = ast_register_application(app_play, mp4_play, syn_play, des_play);
+  int res = ast_register_application(app_play, mp4_exec, syn_play, des_play);
 
   return res;
 }

@@ -23,6 +23,7 @@ services:
       - ./tms-apps/tms_rtp.h:/usr/src/asterisk/apps/tms_rtp.h
       - ./tms-apps/tms_h264.h:/usr/src/asterisk/apps/tms_h264.h
       - ./tms-apps/tms_pcma.h:/usr/src/asterisk/apps/tms_pcma.h
+      - ./tms-apps/app_tms_args.c:/usr/src/asterisk/apps/app_tms_args.c
       - ./tms-apps/app_tms_alaw.c:/usr/src/asterisk/apps/app_tms_alaw.c
       - ./tms-apps/app_tms_mp3.c:/usr/src/asterisk/apps/app_tms_mp3.c
       - ./tms-apps/app_tms_h264.c:/usr/src/asterisk/apps/app_tms_h264.c
