@@ -361,9 +361,9 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 | TMSH264Play | 播放 h264 裸流文件。 | app_tms_h264.c |
 | TMSMp4Play  | 播放 mp4 文件。      | app_tms_mp4.c  |
 
-| 参数     | 说明                         | 必填 |
-| -------- | ---------------------------- | ---- |
-| filename | 要播放的文件                 | 是   |
-| repeat   | 重复播放的次数               | 否   |
-| duration | 播放总时长，单位秒，支持小数 | 否   |
-| stop     | 停止播放的按键               | 否   |
+| 参数     | 说明                                        | 必填 |
+| -------- | ------------------------------------------- | ---- |
+| filename | 要播放的文件                                | 是   |
+| repeat   | 重复播放的次数。小于等于 0 或不指定不重复。 | 否   |
+| duration | 播放总时长，单位秒，支持小数                | 否   |
+| stop     | 停止播放的按键                              | 否   |

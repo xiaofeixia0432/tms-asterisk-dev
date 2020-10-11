@@ -16,9 +16,45 @@
 #define PKT_SIZE (sizeof(struct ast_frame) + AST_FRIENDLY_OFFSET + PKT_PAYLOAD)
 #define PKT_OFFSET (sizeof(struct ast_frame) + AST_FRIENDLY_OFFSET)
 
+typedef struct TmsPlayerContext
+{
+  struct ast_channel *chan;
+  /* 计数器 */
+  int64_t start_time_us; // 微秒
+  int64_t end_time_us;   // 微秒
+  int nb_packets;
+  int nb_video_packets;
+  int nb_video_rtps;
+  int nb_audio_packets;
+  int nb_audio_frames;
+  int nb_pcma_frames;
+  int nb_audio_rtp_samples;
+  int nb_audio_rtps;
+  /* rtp and rtcp */
+  uint32_t rtp_audio_ssrc;
+  uint32_t rtp_video_ssrc;
+  struct sockaddr_in rtp_audio_dest_addr;
+  struct sockaddr_in rtp_video_dest_addr;
+  int first_rtcp_auido;
+  int first_rtcp_video;
+} TmsPlayerContext;
+/**
+ * 记录视频RTP发送相关数据 
+ */
+typedef struct TmsAudioRtpContext
+{
+  uint32_t timestamp;
+  uint32_t base_timestamp;
+  uint32_t cur_timestamp;
+  struct timeval delivery;
+} TmsAudioRtpContext;
+
 int tms_ast_channel_get_rtp_dest(struct ast_channel *chan, struct sockaddr_in *audio_addr, struct sockaddr_in *video_addr);
 
 int tms_ast_channel_get_rtp_ssrc(struct ast_channel *chan, uint32_t *audio_ssrc, uint32_t *video_ssrc);
+
+int tms_init_player_context(struct ast_channel *chan, TmsPlayerContext *player);
+
 /**
  * 构造第一个rtcp包
  */
@@ -99,39 +135,6 @@ void tms_rtcp_first_sr(uint8_t *buf, uint32_t ssrc, struct timeval tv_ntp, int32
   ast_debug(2, "rtcp ssrc = %d(%08x) ntp_time = [%u(%04x),%u(%04x)] rtp_ts = %d(%04x)\n", ssrc, ssrc, ntp_msw, ntp_msw, ntp_lsw, ntp_lsw, rtcp_ts, rtcp_ts);
   ast_debug(2, "rtcp = %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15], buf[16], buf[17], buf[18], buf[19]);
 }
-
-typedef struct TmsPlayerContext
-{
-  struct ast_channel *chan;
-  /* 计数器 */
-  int64_t start_time; // 微秒
-  int64_t end_time;   // 微秒
-  int nb_packets;
-  int nb_video_packets;
-  int nb_video_rtps;
-  int nb_audio_packets;
-  int nb_audio_frames;
-  int nb_pcma_frames;
-  int nb_audio_rtp_samples;
-  int nb_audio_rtps;
-  /* rtp and rtcp */
-  uint32_t rtp_audio_ssrc;
-  uint32_t rtp_video_ssrc;
-  struct sockaddr_in rtp_audio_dest_addr;
-  struct sockaddr_in rtp_video_dest_addr;
-  int first_rtcp_auido;
-  int first_rtcp_video;
-} TmsPlayerContext;
-/**
- * 记录视频RTP发送相关数据 
- */
-typedef struct TmsAudioRtpContext
-{
-  uint32_t timestamp;
-  uint32_t base_timestamp;
-  uint32_t cur_timestamp;
-  struct timeval delivery;
-} TmsAudioRtpContext;
 
 /* 解析字符串形式的地址，给结构体赋值 */
 static int tms_addr_str_to_stuct(char *str, struct sockaddr_in *addr)
@@ -226,6 +229,33 @@ int tms_ast_channel_get_rtp_ssrc(struct ast_channel *chan, uint32_t *audio_ssrc,
     }
     *video_ssrc = atoi(buf);
   }
+
+  return 0;
+}
+
+/* 初始化播放器上下文对象 */
+int tms_init_player_context(struct ast_channel *chan, TmsPlayerContext *player)
+{
+  player->chan = chan;
+  player->start_time_us = av_gettime_relative(); // 单位是微秒
+  player->nb_packets = 0;
+  player->nb_video_packets = 0;
+  player->nb_video_rtps = 0;
+  player->nb_audio_packets = 0;
+  player->nb_audio_frames = 0;
+  player->nb_audio_rtp_samples = 0;
+  player->nb_audio_rtps = 0;
+
+  if (tms_ast_channel_get_rtp_dest(chan, &player->rtp_audio_dest_addr, &player->rtp_video_dest_addr) < 0)
+  {
+    return -1;
+  }
+  if (tms_ast_channel_get_rtp_ssrc(chan, &player->rtp_audio_ssrc, &player->rtp_video_ssrc) < 0)
+  {
+    return -1;
+  }
+
+  ast_debug(1, "音频 RTP 地址 %s:%d，视频 RTP 地址 %s:%d，音频 ssrc %d，视频 ssrc %d\n", ast_inet_ntoa(player->rtp_audio_dest_addr.sin_addr), ntohs(player->rtp_audio_dest_addr.sin_port), ast_inet_ntoa(player->rtp_video_dest_addr.sin_addr), ntohs(player->rtp_video_dest_addr.sin_port), player->rtp_audio_ssrc, player->rtp_video_ssrc);
 
   return 0;
 }
