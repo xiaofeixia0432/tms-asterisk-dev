@@ -288,6 +288,16 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 目录`tms-ami`下
 
+nodejs 版本
+
+实现点击拨号
+
+接收命令
+
+node app.js
+
+在`manager.conf`文件中添加用户
+
 # ARI 接口
 
 通过实现`视频IVR`演示`ARI`接口的使用。
@@ -314,7 +324,27 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 目录`tms-ari`下
 
+# 早期媒体
+
 # sipp 测试
+
+因为 SIP 客户端，例如：linphone，不一定支持所有头（100rel，P-Early-Media 等），因此有些功能的验证需要引入测试工具`sipp`。
+
+## 测试 asterisk 响应
+
+> sipp host.tms.asterisk:5060 -p 20001 -sf 1001.xml -inf 9002.csv -l 1 -m 1 -r 1 -trace_screen -bg
+
+> sipp host.tms.asterisk:5060 -p 20001 -sf 1002.xml -inf 9002.csv -l 1 -m 1 -r 1 -trace_screen -bg
+
+> sipp host.tms.asterisk:5060 -p 20001 -l 1 -m 1 -r 1 -trace_screen -bg -inf 9002.csv -sf 1003.xml
+
+> sipp host.tms.asterisk:5060 -p 20001 -l 1 -m 1 -r 1 -trace_screen -bg -inf 9002.csv -sf 1004.xml
+
+> sipp host.tms.asterisk:5060 -p 20001 -l 1 -m 1 -r 1 -trace_screen -bg -inf 9002.csv -sf 1005.xml
+
+> sipp host.tms.asterisk:5060 -p 20001 -l 1 -m 1 -r 1 -trace_screen -bg -inf 9002.csv -sf 1006.xml
+
+## 测试 asterisk 重发机制
 
 测试 asterisk 信令重发制，参考`pjsip.conf`中的`timer_t1`和`timer_b`参数。
 
@@ -324,15 +354,15 @@ AST_LIBS+=-lavformat -lavcodec -lavutil -lswresample -lswscale -lavfilter
 
 - 基础
 
-> ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -c:a pcm_alaw -vn -f rtp rtp://192.168.43.165:7078 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://192.168.43.165:9078
+> ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -c:a pcm_alaw -vn -f rtp rtp://host.tms.asterisk:7078 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://host.tms.asterisk:9078
 
 - 音频延迟 2 秒播放
 
-> ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -itsoffset 2 -i sine-8k-testsrc2-gop10-10s.mp4 -map 0:v:0 -map 1:a:0 -c:a pcm_alaw -vn -f rtp rtp://192.168.43.165:7078 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://192.168.43.165:7080
+> ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -itsoffset 2 -i sine-8k-testsrc2-gop10-10s.mp4 -map 0:v:0 -map 1:a:0 -c:a pcm_alaw -vn -f rtp rtp://host.tms.asterisk:7078 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://host.tms.asterisk:7080
 
 - 音频时间戳延后 1 秒
 
-> ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -c:a pcm_alaw -vn -output_ts_offset 1 -f rtp rtp://192.168.43.165:5006 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://192.168.43.165:5008
+> ffmpeg -re -i sine-8k-testsrc2-gop10-10s.mp4 -c:a pcm_alaw -vn -output_ts_offset 1 -f rtp rtp://host.tms.asterisk:5006 -an -c:v copy -bsf: h264_mp4toannexb -f rtp rtp://host.tms.asterisk:5008
 
 ## ffprobe 命令
 
