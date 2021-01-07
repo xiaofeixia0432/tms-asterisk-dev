@@ -28,6 +28,18 @@ typedef struct Resampler
   uint8_t **data;     // 重采样缓冲区
 } Resampler;
 
+/*
+* 拆分媒体包信息
+*/
+typedef struct RTP_SPLIT_MSG
+{
+  char *buff;
+  //分配buff内存大小
+  int buff_memory_size;
+  uint32_t *rtp_timestamp; 
+  int split_packet_size; 
+}rtp_split_msg;
+
 int tms_init_pcma_encoder(PCMAEnc *encoder);
 
 int tms_init_audio_resampler(AVCodecContext *input_codec_context,
@@ -45,6 +57,9 @@ void tms_add_audio_frame_send_delay(AVFrame *frame, TmsPlayerContext *player);
 int tms_rtp_send_audio(TmsAudioRtpContext *rtp, PCMAEnc *encoder, TmsPlayerContext *player);
 
 void tms_dump_video_packet(AVPacket *pkt, TmsPlayerContext *player);
+//2020-12-23 --- by wpc add --- 
+int tms_send_audio_rtp(rtp_split_msg *msg,TmsPlayerContext *player,char *buff,int buff_len);
+extern void split_packet_size(rtp_split_msg *msg,PCMAEnc *encoder,TmsPlayerContext *player);
 
 /* 初始化音频编码器（转换为pcma格式） */
 int tms_init_pcma_encoder(PCMAEnc *encoder)
@@ -246,16 +261,67 @@ void tms_add_audio_frame_send_delay(AVFrame *frame, TmsPlayerContext *player)
  * 
  * 应该处理采样数超过限制进行分包的情况 
  */
-int tms_rtp_send_audio(TmsAudioRtpContext *rtp, PCMAEnc *encoder, TmsPlayerContext *player)
+// int tms_rtp_send_audio(TmsAudioRtpContext *rtp, PCMAEnc *encoder, TmsPlayerContext *player)
+// {
+//   struct ast_channel *chan = player->chan;
+
+//   uint8_t *output_data = encoder->packet.data;
+//   int nb_samples = encoder->nb_samples;
+
+//   unsigned char buffer[PKT_SIZE];
+//   struct ast_frame *f = (struct ast_frame *)buffer;
+//   rtp->timestamp = rtp->cur_timestamp;
+
+//   /* Unset */
+//   memset(f, 0, PKT_SIZE);
+
+//   AST_FRAME_SET_BUFFER(f, f, PKT_OFFSET, PKT_PAYLOAD);
+
+//   /* 设置帧类型和编码格式 */
+//   f->frametype = AST_FRAME_VOICE;
+//   f->subclass.format = ast_format_alaw;
+//   /* 时间戳 */
+//   // f->delivery.tv_usec = 0;
+//   // f->delivery.tv_sec = 0;
+//   f->delivery = ast_tvnow();
+//   // 告知asterisk使用指定的时间戳
+//   ast_set_flag(f, AST_FRFLAG_HAS_TIMING_INFO);
+//   f->ts = rtp->timestamp;
+//   /* Don't free the frame outside */
+//   f->mallocd = 0;
+//   f->offset = AST_FRIENDLY_OFFSET;
+//   /* 设置包含的采样数 */
+//   f->samples = nb_samples;
+//   /* 设置采样 */
+//   uint8_t *data;
+//   data = AST_FRAME_GET_BUFFER(f);
+//   memcpy(data, output_data, nb_samples);
+//   f->datalen = nb_samples;
+
+//   /* Write frame */
+//   ast_write(chan, f);
+//   ast_frfree(f);
+
+//   player->nb_audio_rtps++;
+
+//   ast_debug(2, "完成 #%d 个音频RTP包发送 \n", player->nb_audio_rtps);
+
+//   return 0;
+// }
+
+/*2020-12-23 
+  发送指定缓存区rtp数据,提前已经做了分包
+*/
+int tms_send_audio_rtp(rtp_split_msg *msg,TmsPlayerContext *player,char *buff,int buff_len)
 {
   struct ast_channel *chan = player->chan;
 
-  uint8_t *output_data = encoder->packet.data;
-  int nb_samples = encoder->nb_samples;
+  //uint8_t *output_data = encoder->packet.data;
+  //int nb_samples = encoder->nb_samples;
 
   unsigned char buffer[PKT_SIZE];
   struct ast_frame *f = (struct ast_frame *)buffer;
-  rtp->timestamp = rtp->cur_timestamp;
+  //rtp->timestamp = rtp->cur_timestamp;
 
   /* Unset */
   memset(f, 0, PKT_SIZE);
@@ -271,28 +337,140 @@ int tms_rtp_send_audio(TmsAudioRtpContext *rtp, PCMAEnc *encoder, TmsPlayerConte
   f->delivery = ast_tvnow();
   // 告知asterisk使用指定的时间戳
   ast_set_flag(f, AST_FRFLAG_HAS_TIMING_INFO);
-  f->ts = rtp->timestamp;
+  f->ts = *(msg->rtp_timestamp);
   /* Don't free the frame outside */
   f->mallocd = 0;
   f->offset = AST_FRIENDLY_OFFSET;
-  /* 设置包含的采样数 */
-  f->samples = nb_samples;
   /* 设置采样 */
   uint8_t *data;
   data = AST_FRAME_GET_BUFFER(f);
-  memcpy(data, output_data, nb_samples);
-  f->datalen = nb_samples;
-
+  memcpy(data, buff, buff_len);
+  f->datalen = buff_len;
+  /* 设置包含的采样数 */
+  f->samples = buff_len;
   /* Write frame */
   ast_write(chan, f);
   ast_frfree(f);
+  //pcma 每个rtp包包含160个采样数据,每个rtp包间隔20ms
+  int duration = 20000;
+  usleep(duration);
+  //基础时间戳+160,返回给下次媒体包时间戳
+  //+160 经过asterisk时就变成 时间戳间隔timestamp为1280,  通过换算传给asterisk帧结构f->ts时应该是20ms  160 / (1280/160) = 20
+  //经换算得到*(msg->rtp_timestamp) = *(msg->rtp_timestamp) + 20; 每个rtp包间隔20ms f->ts + 20ms
+  *(msg->rtp_timestamp) = *(msg->rtp_timestamp) + 20;
+  ast_debug(2, "*(msg->rtp_timestamp):%u \n",*(msg->rtp_timestamp));
 
-  player->nb_audio_rtps++;
+  //player->nb_audio_rtps++;
 
-  ast_debug(2, "完成 #%d 个音频RTP包发送 \n", player->nb_audio_rtps);
+  //ast_debug(2, "完成 #%d 个音频RTP包发送 \n", player->nb_audio_rtps);
 
   return 0;
 }
+
+
+void split_packet_size(rtp_split_msg *msg,PCMAEnc *encoder,TmsPlayerContext *player)
+{
+  char buff[640] = {'\0'};
+  int index = 0,  j = 0, k = 0;
+  if(encoder->packet.size > msg->split_packet_size)
+  {
+    //ast_debug(2,"@@@encoder->packet.size >%d,strlen(msg->buff):%d \n",msg->split_packet_size,(int)strlen(msg->buff));
+    if(strlen(msg->buff)>0)
+    {
+      memcpy(buff,msg->buff,strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff));
+      memcpy(buff+(strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)),encoder->packet.data,msg->split_packet_size - (strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)));
+      tms_send_audio_rtp(msg, player,buff,strlen(buff));
+      index = msg->split_packet_size - (strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff));
+      //ast_debug(2,"@@@encoder->packet.size >%d strlen(data)>0,index:%d@@@\n",msg->split_packet_size,index);
+
+      //剩余数据/160循环发送,不足160再次保存到data中
+      for(j=0;j<(encoder->packet.size - (msg->split_packet_size - (strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff))))/msg->split_packet_size;j++)
+      {
+        memset(buff,0,sizeof(buff));
+        memcpy(buff,encoder->packet.data+(msg->split_packet_size -(strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)) + msg->split_packet_size * j),msg->split_packet_size);
+        tms_send_audio_rtp(msg, player,buff,strlen(buff));             
+        index += msg->split_packet_size;
+        //ast_debug(2,"@@@encoder->packet.size >%d index:%d@@@\n",msg->split_packet_size,index);
+      }
+      //encoder->packet.size %160余数保存到data中
+      memset(msg->buff,0,msg->buff_memory_size);
+      memcpy(msg->buff,encoder->packet.data+index,encoder->packet.size - index);
+      //ast_debug(2,"@@@encoder->packet.size >%d strlen(msg->buff)>0 data:%d@@@\n",msg->split_packet_size,encoder->packet.size - index);            
+      
+    }else 
+    {
+        index = 0;
+        memset(msg->buff,0,msg->buff_memory_size);
+        for(j=0;j<encoder->packet.size/msg->split_packet_size;j++)
+      {
+        memset(buff,0,sizeof(buff));
+        memcpy(buff,encoder->packet.data + msg->split_packet_size * j,msg->split_packet_size);
+        tms_send_audio_rtp(msg, player,buff,strlen(buff));
+        index += msg->split_packet_size;
+        //ast_debug(2,"@@@encoder->packet.size >%d strlen(data)<0 index:%d@@@\n",msg->split_packet_size,index);
+      }           
+      //memcpy(buff,encoder->packet.data,160);
+      memcpy(msg->buff,encoder->packet.data+index,encoder->packet.size % msg->split_packet_size);
+      //ast_debug(2,"@@@encoder->packet.size >%d strlen(data)<0 data:%d@@@\n",msg->split_packet_size,encoder->packet.size % msg->split_packet_size);
+    }
+
+
+  }else if(encoder->packet.size==msg->split_packet_size) 
+  {
+    
+    memcpy(buff,encoder->packet.data,msg->split_packet_size);
+    tms_send_audio_rtp(msg, player,buff,strlen(buff));
+    //ast_debug(2,"@@@encoder->packet.size ==%d strlen(msg->buff)<0 @@@\n",msg->split_packet_size);
+    memset(buff,0,sizeof(buff));
+  }else
+  {
+    /* 小于160 */
+    /* code */
+    ast_debug(2,"@@@encoder->packet.size < %d @@@\n",msg->split_packet_size);
+    if(strlen(msg->buff)>0)
+    {
+      //因为只要数据达到160就发送，encoder->packet.size<160，data<160也小于160
+      //ast_debug(2,"@@@encoder->packet.size < %d strlen(msg->buff)>0 @@@\n",msg->split_packet_size);
+      if((strlen(msg->buff)+encoder->packet.size)>msg->split_packet_size)
+      {
+        memcpy(buff,msg->buff,(strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)));
+        memcpy(buff+(strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)),encoder->packet.data,msg->split_packet_size - (strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)));
+        tms_send_audio_rtp(msg, player, buff,strlen(buff));
+        
+        j = msg->split_packet_size -(strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff));
+        memset(msg->buff,0,msg->buff_memory_size);
+        memcpy(msg->buff,encoder->packet.data+j,encoder->packet.size - j);
+        //ast_debug(2,"@@@(strlen(msg->buff)+encoder->packet.size)>%d ,j:%d, msg->buff:%d@@@\n",msg->split_packet_size,j,encoder->packet.size - j);
+
+      }else if((strlen(msg->buff)+encoder->packet.size)==msg->split_packet_size)
+      {
+        memcpy(buff,msg->buff,(strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)));
+        memcpy(buff+(strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff)),encoder->packet.data,encoder->packet.size);
+        tms_send_audio_rtp(msg, player, buff,strlen(buff));
+        //ast_debug(2,"@@@(strlen(msg->buff)+encoder->packet.size)==%d @@@\n",msg->split_packet_size);
+        memset(buff,0,sizeof(buff));
+        memset(msg->buff,0,msg->buff_memory_size);
+      }else
+      {
+        /* code */
+        k = strlen(msg->buff)>msg->buff_memory_size ? msg->buff_memory_size : strlen(msg->buff);
+        memcpy(msg->buff + k,encoder->packet.data,encoder->packet.size);
+        //ast_debug(2,"@@@(strlen(msg->buff)+encoder->packet.size)<%d packet.size:%d@@@\n",msg->split_packet_size,encoder->packet.size);
+      }
+      
+    }else 
+    {
+      memset(msg->buff,0,msg->buff_memory_size);
+      memcpy(msg->buff,encoder->packet.data,encoder->packet.size);
+      //ast_debug(2,"@@@(strlen(msg->buff)<0 packet.size:%d@@@\n",encoder->packet.size);
+    }
+  }
+
+
+}
+
+
+
 
 /* 输出视频packet信息 */
 void tms_dump_video_packet(AVPacket *pkt, TmsPlayerContext *player)

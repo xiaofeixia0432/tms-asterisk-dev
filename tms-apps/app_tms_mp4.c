@@ -275,10 +275,10 @@ static int tms_handle_video_packet(TmsPlayerContext *player, TmsInputStream *ist
   return 0;
 }
 /* 处理音频媒体包 */
-static int tms_handle_audio_packet(TmsPlayerContext *player, TmsInputStream *ist, Resampler *resampler, PCMAEnc *pcma_enc, AVPacket *pkt, AVFrame *frame, TmsAudioRtpContext *audio_rtp_ctx)
+// --- 2020-12-24 by wpc modify , add two parameter char *sendbuff,int sendbuff_memory_size end ---
+static int tms_handle_audio_packet(TmsPlayerContext *player, TmsInputStream *ist, Resampler *resampler, PCMAEnc *pcma_enc, AVPacket *pkt, AVFrame *frame, TmsAudioRtpContext *audio_rtp_ctx,rtp_split_msg *msg)
 {
   int ret = 0;
-
   player->nb_audio_packets++;
   /* 将媒体包发送给解码器 */
   if ((ret = avcodec_send_packet(ist->dec_ctx, pkt)) < 0)
@@ -311,7 +311,9 @@ static int tms_handle_audio_packet(TmsPlayerContext *player, TmsInputStream *ist
     tms_dump_audio_frame(frame, player);
 
     /* 添加发送间隔 */
-    tms_add_audio_frame_send_delay(frame, player);
+    //由于大网中sdp协商中pcma时间间隔ptime:20ms, 1000/20=50, 8000/50=160,每次发送160采样数据包
+    //mp4文件读出数据不是按照160组包,所以要自己封包发送,并且后面添加间隔时间 ---2020-12-23 by wpc modify ---
+    //tms_add_audio_frame_send_delay(frame, player);
 
     /* 对获得的音频帧执行重采样 */
     ret = tms_audio_resample(resampler, frame, pcma_enc);
@@ -350,18 +352,27 @@ static int tms_handle_audio_packet(TmsPlayerContext *player, TmsInputStream *ist
         return -1;
       }
       /* 计算时间戳，单位毫秒（milliseconds） a*b/c */
+      //---2020-12-24 by wpc add --- 由于pcma在大网传输中进行每160采样发送一次,所以从mp4中读取的一个音频帧要拆分多个指定大小160包进行发送
       audio_rtp_ctx->cur_timestamp += av_rescale(pcma_enc->nb_samples, AV_TIME_BASE, RTP_PCMA_TIME_BASE) / 1000;
       if (!player->first_rtcp_auido)
       {
         tms_audio_rtcp_first_sr(player, audio_rtp_ctx);
+        *(msg->rtp_timestamp) =  audio_rtp_ctx->cur_timestamp;
       }
       /* 通过rtp发送音频 */
-      tms_rtp_send_audio(audio_rtp_ctx, pcma_enc, player);
+      //tms_rtp_send_audio(audio_rtp_ctx, pcma_enc, player);
+      split_packet_size(msg,pcma_enc,player);
     }
     av_packet_unref(&pcma_enc->packet);
     av_frame_free(&pcma_enc->frame);
   }
-
+  /*
+  if(strlen(sendbuff)>0)
+  {
+    tms_send_audio_rtp(audio_rtp_ctx, player, sendbuff,strlen(sendbuff));
+    ast_debug(2,"@@@av_read_frame while after,#####send_rtp####strlen(tmp):%d !@@@\n",(int)strlen(sendbuff));
+  }
+  */
   return 0;
 }
 /**
@@ -417,7 +428,7 @@ static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, in
   int ret = 0;
   int pause = 0; // 暂停状态
   int ms = -1;
-
+  char tmp[2048] = {'\0'};
   TmsInputStream *ists[2]; // 记录媒体流信息
   AVFormatContext *ictx = NULL;
   AVBSFContext *h264bsfc; // mp4转h264，将sps和pps放到推送流中
@@ -425,6 +436,12 @@ static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, in
   Resampler resampler = {.max_nb_samples = 0};
   PCMAEnc pcma_enc = {.nb_samples = 0};
   int nb_streams = 0; // 媒体流的数量
+  uint32_t cur_timestamp = 0;
+  rtp_split_msg msg;
+  memset(&msg,0,sizeof(msg));
+  msg.buff = tmp;
+  msg.buff_memory_size = sizeof(tmp);
+  msg.split_packet_size = 160;
 
   if ((ret = tms_open_file(filename, &ictx, &h264bsfc, &resampler, &pcma_enc, ists, &nb_streams)) < 0)
   {
@@ -451,7 +468,7 @@ static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, in
 
   AVPacket *pkt = av_packet_alloc(); // ffmpeg媒体包
   AVFrame *frame = av_frame_alloc(); // ffmpeg媒体帧
-
+  msg.rtp_timestamp = &cur_timestamp;
   while (1)
   {
     /**
@@ -481,7 +498,8 @@ static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, in
     }
     else if (ist->codec->type == AVMEDIA_TYPE_AUDIO)
     {
-      if ((ret = tms_handle_audio_packet(&player, ist, &resampler, &pcma_enc, pkt, frame, &audio_rtp_ctx)) < 0)
+      //--- 2020-12-24 by wpc modify ---
+      if ((ret = tms_handle_audio_packet(&player, ist, &resampler, &pcma_enc, pkt, frame, &audio_rtp_ctx,&msg)) < 0)
       {
         *stop = 1;
         goto clean;
@@ -559,6 +577,11 @@ static int mp4_play_once(struct ast_channel *chan, char *filename, int *stop, in
         *out_pause_duration_us = player.pause_duration_us;
     }
   }
+  if(strlen(tmp)>0)
+  {
+    tms_send_audio_rtp(&msg, &player, tmp,strlen(tmp));
+    ast_debug(2,"@@@av_read_frame while after,#####send_rtp####strlen(tmp):%d !@@@\n",(int)strlen(tmp));
+  } 
 
 end:
   /* Log end */

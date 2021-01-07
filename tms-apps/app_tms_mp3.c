@@ -248,7 +248,7 @@ static int init_resampler(Decoder *decoder,
   AVCodecContext *input_codec_context = decoder->cctx;
   AVCodecContext *output_codec_context = encoder->cctx;
   SwrContext **resample_context = &resampler->swrctx;
-
+  ast_debug(2, "in_fmt:%d,in_sample_rate:%d,out_fmt:%d,out_sample_rate:%d\n",input_codec_context->sample_fmt,input_codec_context->sample_rate,output_codec_context->sample_fmt,output_codec_context->sample_rate);
   /*
   * Create a resampler context for the conversion.
   * Set the conversion parameters.
@@ -337,7 +337,7 @@ static int init_encoder_frame(Encoder *encoder, Resampler *resampler)
   memcpy(frame->data[0], *(resampler->data), nb_samples * 2);
 
   encoder->frame = frame;
-
+  ast_debug(2, "sample_fmt:%d,nb_samples:%d,frame->sample_rate:%d\n",frame->format,frame->nb_samples,frame->sample_rate);
   return 0;
 }
 /**
@@ -390,14 +390,19 @@ end:
   return ret;
 }
 /* 发送RTP包 */
-static int send_rtp(struct ast_channel *chan, char *src, Encoder *encoder)
+static int send_rtp(struct ast_channel *chan, char *src, char *buff,int buflen)
 {
-  uint8_t *output_data = encoder->packet.data;
-  int nb_samples = encoder->nb_samples;
-
+  //uint8_t *output_data = (uint8_t *)buff;//encoder->packet.data;
+  //int nb_samples = encoder->nb_samples;
+  
+  //---add wpc 2020-12-10 
+  //int count = buflen;//nb_samples;
+  //int i = 0;
+  //while(count > 0)
+  //{
   unsigned char buffer[PKT_SIZE];
   struct ast_frame *f = (struct ast_frame *)buffer;
-
+  //---add wpc 2020-12-10 
   /* Unset */
   memset(f, 0, PKT_SIZE);
 
@@ -413,22 +418,351 @@ static int send_rtp(struct ast_channel *chan, char *src, Encoder *encoder)
   f->mallocd = 0;
   f->offset = AST_FRIENDLY_OFFSET;
   /* 设置包含的采样数 */
-  f->samples = nb_samples;
+  //f->samples = nb_samples;
   /* 设置采样 */
   uint8_t *data;
   data = AST_FRAME_GET_BUFFER(f);
-  memcpy(data, output_data, nb_samples);
-  f->datalen = nb_samples;
+  /*
+  if(count - 320 >=0)
+  {
+    
+  memcpy(data, output_data+i, 320);
+  count -= 320;
+  i +=320;
+  f->datalen = 320;
+  f->samples = 160;
+  ast_debug(2, "@@@f->samples:%d\n", f->samples);
 
-  encoder->nb_rtps++;
+  }else 
+  {	
+    memcpy(data, output_data+i, count);
+    f->datalen = count;
+    i += count;
+    f->samples = count/2;
+    ast_debug(2, "@@@f->samples:%d\n", f->samples);
+    count = 0;
+  }
+  */
+  memcpy(data, buff, buflen);
+  f->datalen = buflen;
+  f->samples = buflen;
+  //encoder->nb_rtps++;
 
-  /* Write frame */
+  //ast_debug(2, "@@@@duration@@@@\n");
+ /* Write frame */
   ast_write(chan, f);
   ast_frfree(f);
-
-  ast_debug(2, "完成 #%d 个音频RTP包发送 \n", encoder->nb_rtps);
+  int duration = 20000;
+  usleep(duration);
+ //}
+  //ast_debug(2, "完成 #%d 个音频RTP包发送 \n", encoder->nb_rtps);
 
   return 0;
+}
+
+
+
+// static int mp3_play(struct ast_channel *chan, const char *data)
+// {
+//   struct ast_module_user *u = NULL;
+
+//   Decoder decoder = {.nb_bytes = 0, .nb_packets = 0, .nb_frames = 0, .nb_samples = 0};
+//   Resampler resampler = {.max_nb_samples = 0};
+//   Encoder encoder = {.nb_bytes = 0, .nb_packets = 0, .nb_frames = 0, .nb_rtps = 0};
+
+//   int ret = 0;
+//   char src[128]; // rtp.src
+//   char *parse;
+//   char buff[8192] = {'\0'};
+//   int i = 0, j = 0;
+//   AST_DECLARE_APP_ARGS(args, AST_APP_ARG(filename); AST_APP_ARG(options););
+
+//   ast_debug(1, "mp3play %s\n", (char *)data);
+
+//   /* Set random src */
+//   snprintf(src, 128, "mp3play%08lx", ast_random());
+
+//   /* Lock module */
+//   u = ast_module_user_add(chan);
+
+//   /* Duplicate input */
+//   parse = ast_strdup(data);
+
+//   /* Get input data */
+//   AST_STANDARD_APP_ARGS(args, parse);
+
+//   char *filename = (char *)args.filename;
+
+//   decoder.filename = filename;
+
+//   /* 设置解码器 */
+//   if ((ret = init_decoder(&decoder)) < 0)
+//   {
+//     goto clean;
+//   }
+//   /* 设置编码器 */
+//   if ((ret = init_encoder(&encoder)) < 0)
+//   {
+//     goto clean;
+//   }
+//   /* 设置重采样，将解码出的fltp采样格式，转换为s16采样格式 */
+//   if ((ret = init_resampler(&decoder, &encoder, &resampler)) < 0)
+//   {
+//     goto clean;
+//   }
+
+//   int64_t start_time = av_gettime_relative(); // Get the current time in microseconds.
+
+//   while (1)
+//   {
+//     if ((ret = av_read_frame(decoder.ictx, decoder.packet)) == AVERROR_EOF)
+//     {
+//       break;
+//     }
+//     else if (ret < 0)
+//     {
+//       ast_log(LOG_WARNING, "文件 %s 读取编码包失败 %s\n", filename, av_err2str(ret));
+//       goto clean;
+//     }
+
+//     decoder.nb_packets++;
+//     decoder.nb_bytes += decoder.packet->size;
+//     ast_debug(2,"@@@nb_packets:%d,nb_bytes:%d@@@\n",decoder.nb_packets,decoder.nb_bytes);
+//     tms_dump_audio_packet(decoder.nb_packets, decoder.packet);
+
+//     /* 编码包送解码器 */
+//     if ((ret = avcodec_send_packet(decoder.cctx, decoder.packet)) < 0)
+//     {
+//       ast_log(LOG_WARNING, "文件 %s 编码包送解码器失败 %s\n", filename, av_err2str(ret));
+//       goto clean;
+//     }
+
+//     while (1)
+//     {
+//       /* 从解码器获取音频帧 */
+//       ret = avcodec_receive_frame(decoder.cctx, decoder.frame);
+//       if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+//       {
+//         break;
+//       }
+//       else if (ret < 0)
+//       {
+//         ast_log(LOG_WARNING, "读取文件 %s 音频帧 #%d 错误 %s\n", filename, decoder.nb_frames + 1, av_err2str(ret));
+//         goto clean;
+//       }
+
+//       decoder.nb_frames++;
+//       decoder.nb_samples += decoder.frame->nb_samples;
+//       tms_dump_audio_frame(decoder.nb_packets, decoder.nb_frames, decoder.frame);
+//       ast_debug(2, "decoder.nb_frames:%d,decoder.frame->nb_samples:%d,decoder.nb_samples:%d\n",decoder.nb_frames,decoder.frame->nb_samples,decoder.nb_samples);
+//       /* 添加时间间隔 */
+//       //add_interval(&decoder);
+//       //int duration = 320/8000 * 1000 * 1000;
+//       //usleep(duration);
+//       /* 对获得音频帧执行重采样 */
+//       ret = resample(&resampler, &decoder, &encoder);
+//       if (ret < 0)
+//       {
+//         goto clean;
+//       }
+
+//       /* 重采样后的媒体帧 */
+//       ret = init_encoder_frame(&encoder, &resampler);
+//       if (ret < 0)
+//       {
+//         goto clean;
+//       }
+//       encoder.nb_frames++;
+
+//       /* 音频帧送编码器准备编码 */
+//       if ((ret = avcodec_send_frame(encoder.cctx, encoder.frame)) < 0)
+//       {
+//         ast_log(LOG_ERROR, "音频帧发送编码器错误\n");
+//         goto clean;
+//       }
+
+//       /* 要通过rtp输出的包 */
+//       init_encoder_packet(&encoder.packet);
+
+//       while (1)
+//       {
+//         ret = avcodec_receive_packet(encoder.cctx, &encoder.packet);
+//         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+//         {
+//           break;
+//         }
+//         else if (ret < 0)
+//         {
+//           ast_log(LOG_ERROR, "Error encoding audio frame\n");
+//           goto clean;
+//         }
+//         encoder.nb_packets++;
+//         encoder.nb_bytes += encoder.packet.size;
+// 	 ast_debug(2,"0000@@@strlen(buff):%d,i:%d@@@\n",(int)strlen(buff),i);
+
+//         if(encoder.packet.size !=576) continue;
+// 	ast_debug(2,"111111@@@strlen(buff):%d,i:%d@@@\n",(int)strlen(buff),i);
+
+// 	if(strlen(buff)<=5760)
+// 	{
+// 		ast_debug(2,"22222@@@strlen(buff):%d,i:%d@@@\n",(int)strlen(buff),i);
+
+// 		if(strlen(buff)==5760)
+// 		{
+// 			ast_debug(2,"@@@strlen(buff):%d,i:%d@@@\n",(int)strlen(buff),i);
+
+// 			send_rtp(chan, src, buff,strlen(buff));
+// 			memset(buff,0,sizeof(buff));
+// 			i = 0;
+// 		}else
+// 		{
+// 			ast_debug(2,"@@@strlen(buff):%d,i:%d,encoder.packet.size:%d@@@\n",(int)strlen(buff),i,encoder.packet.size);
+
+// 			memcpy(buff+i,encoder.packet.data,encoder.packet.size);
+// 			i += encoder.packet.size;
+// 		}
+// 	}else
+// 	{
+// 		ast_debug(2,"@@@strlen(buff):%d,i:%d@@@\n",(int)strlen(buff),i);
+// 		memset(buff,0,sizeof(buff));
+//                 i = 0;
+
+// 	}
+//         ast_debug(2, "生成编码包 #%d size= %d \n", encoder.nb_packets, encoder.packet.size);
+
+//         //send_rtp(chan, src, &encoder);
+//       }
+//       av_packet_unref(&encoder.packet);
+//       av_frame_free(&encoder.frame);
+//     }
+//     av_packet_unref(decoder.packet);
+//   }
+
+//   int64_t end_time = av_gettime_relative();
+
+//   ast_debug(1, "结束播放文件 %s，共读取 %d 个包，共 %d 字节，共生成 %d 个包，共 %d 字节，共发送RTP包 %d 个，采样 %d 个，耗时 %ld\n", filename, decoder.nb_packets, decoder.nb_bytes, encoder.nb_packets, encoder.nb_bytes, encoder.nb_rtps, decoder.nb_samples, end_time - start_time);
+
+// clean:
+//   if (resampler.data)
+//     av_freep(&resampler.data);
+
+//   // if (decoder.frame)
+//   //   av_frame_free(&decoder.frame);
+
+//   // if (input_pkt)
+//   //   av_packet_free(&input_pkt);
+
+//   // if (ictx)
+//   //   avformat_close_input(&ictx);
+
+//   /* Unlock module*/
+//   ast_module_user_remove(u);
+
+//   free(parse);
+
+//   /* Exit */
+//   return ret;
+// }
+
+static void split_packet_size(struct ast_channel *chan,char *src,int split_packet_size,char *data,int data_memory_size, Encoder *encoder)
+{
+  char buff[640] = {'\0'};
+  int index = 0,  j = 0, k = 0;
+  if(encoder->packet.size > split_packet_size)
+  {
+    ast_debug(2,"@@@encoder->packet.size >%d,strlen(data):%d \n",split_packet_size,(int)strlen(data));
+    if(strlen(data)>0)
+    {
+      memcpy(buff,data,strlen(data)>data_memory_size ? data_memory_size : strlen(data));
+      memcpy(buff+(strlen(data)>data_memory_size ? data_memory_size : strlen(data)),encoder->packet.data,split_packet_size - (strlen(data)>data_memory_size ? data_memory_size : strlen(data)));
+      send_rtp(chan, src, buff,strlen(buff));
+      index = split_packet_size - (strlen(data)>data_memory_size ? data_memory_size : strlen(data));
+      ast_debug(2,"@@@encoder->packet.size >%d strlen(data)>0,index:%d@@@\n",split_packet_size,index);
+
+      //剩余数据/160循环发送,不足160再次保存到data中
+      for(j=0;j<(encoder->packet.size - (split_packet_size - (strlen(data)>data_memory_size ? data_memory_size : strlen(data))))/split_packet_size;j++)
+      {
+        memset(buff,0,sizeof(buff));
+        memcpy(buff,encoder->packet.data+(split_packet_size -(strlen(data)>data_memory_size ? data_memory_size : strlen(data)) + split_packet_size * j),split_packet_size);
+        send_rtp(chan, src, buff,strlen(buff));             
+        index += split_packet_size;
+        ast_debug(2,"@@@encoder->packet.size >%d index:%d@@@\n",split_packet_size,index);
+      }
+      //encoder->packet.size %160余数保存到data中
+      memset(data,0,data_memory_size);
+      memcpy(data,encoder->packet.data+index,encoder->packet.size - index);
+      ast_debug(2,"@@@encoder->packet.size >%d strlen(data)>0 data:%d@@@\n",split_packet_size,encoder->packet.size - index);            
+      
+    }else 
+    {
+        index = 0;
+        memset(data,0,data_memory_size);
+        for(j=0;j<encoder->packet.size/split_packet_size;j++)
+      {
+        memset(buff,0,sizeof(buff));
+        memcpy(buff,encoder->packet.data + split_packet_size * j,split_packet_size);
+        send_rtp(chan, src, buff,strlen(buff));
+        index += split_packet_size;
+        ast_debug(2,"@@@encoder->packet.size >%d strlen(data)<0 index:%d@@@\n",split_packet_size,index);
+      }           
+      //memcpy(buff,encoder->packet.data,160);
+      memcpy(data,encoder->packet.data+index,encoder->packet.size % split_packet_size);
+      ast_debug(2,"@@@encoder->packet.size >%d strlen(data)<0 data:%d@@@\n",split_packet_size,encoder->packet.size % split_packet_size);
+    }
+
+
+  }else if(encoder->packet.size==split_packet_size) 
+  {
+    
+    memcpy(buff,encoder->packet.data,split_packet_size);
+    send_rtp(chan, src, buff,strlen(buff));
+    ast_debug(2,"@@@encoder->packet.size ==%d strlen(data)<0 @@@\n",split_packet_size);
+    memset(buff,0,sizeof(buff));
+  }else
+  {
+    /* 小于160 */
+    /* code */
+    ast_debug(2,"@@@encoder->packet.size < %d @@@\n",split_packet_size);
+    if(strlen(data)>0)
+    {
+      //因为只要数据达到160就发送，encoder->packet.size<160，data<160也小于160
+      ast_debug(2,"@@@encoder->packet.size < %d strlen(data)>0 @@@\n",split_packet_size);
+      if((strlen(data)+encoder->packet.size)>split_packet_size)
+      {
+        memcpy(buff,data,(strlen(data)>data_memory_size ? data_memory_size : strlen(data)));
+        memcpy(buff+(strlen(data)>data_memory_size ? data_memory_size : strlen(data)),encoder->packet.data,split_packet_size - (strlen(data)>data_memory_size ? data_memory_size : strlen(data)));
+        send_rtp(chan, src, buff,strlen(buff));
+        
+        j = split_packet_size -(strlen(data)>data_memory_size ? data_memory_size : strlen(data));
+        memset(data,0,data_memory_size);
+        memcpy(data,encoder->packet.data+j,encoder->packet.size - j);
+        ast_debug(2,"@@@(strlen(data)+encoder->packet.size)>%d ,j:%d, data:%d@@@\n",split_packet_size,j,encoder->packet.size - j);
+
+      }else if((strlen(data)+encoder->packet.size)==split_packet_size)
+      {
+        memcpy(buff,data,(strlen(data)>data_memory_size ? data_memory_size : strlen(data)));
+        memcpy(buff+(strlen(data)>data_memory_size ? data_memory_size : strlen(data)),encoder->packet.data,encoder->packet.size);
+        send_rtp(chan, src, buff,strlen(buff));
+        ast_debug(2,"@@@(strlen(data)+encoder->packet.size)==%d @@@\n",split_packet_size);
+        memset(buff,0,sizeof(buff));
+        memset(data,0,data_memory_size);
+      }else
+      {
+        /* code */
+        k = strlen(data)>data_memory_size ? data_memory_size : strlen(data);
+        memcpy(data + k,encoder->packet.data,encoder->packet.size);
+        ast_debug(2,"@@@(strlen(data)+encoder->packet.size)<%d packet.size:%d@@@\n",split_packet_size,encoder->packet.size);
+      }
+      
+    }else 
+    {
+      memset(data,0,data_memory_size);
+      memcpy(data,encoder->packet.data,encoder->packet.size);
+      ast_debug(2,"@@@(strlen(data)<0 packet.size:%d@@@\n",encoder->packet.size);
+    }
+  }
+
+
 }
 
 static int mp3_play(struct ast_channel *chan, const char *data)
@@ -442,7 +776,11 @@ static int mp3_play(struct ast_channel *chan, const char *data)
   int ret = 0;
   char src[128]; // rtp.src
   char *parse;
-
+  //char buff[8192] = {'\0'};
+  //char buff[640] = {'\0'};
+  char tmp[2048] = {'\0'};
+  //int index = 0, i = 0, j = 0, k = 0;
+  int split_size = 160;
   AST_DECLARE_APP_ARGS(args, AST_APP_ARG(filename); AST_APP_ARG(options););
 
   ast_debug(1, "mp3play %s\n", (char *)data);
@@ -495,7 +833,7 @@ static int mp3_play(struct ast_channel *chan, const char *data)
 
     decoder.nb_packets++;
     decoder.nb_bytes += decoder.packet->size;
-
+    ast_debug(2,"@@@nb_packets:%d,nb_bytes:%d@@@\n",decoder.nb_packets,decoder.nb_bytes);
     tms_dump_audio_packet(decoder.nb_packets, decoder.packet);
 
     /* 编码包送解码器 */
@@ -521,12 +859,12 @@ static int mp3_play(struct ast_channel *chan, const char *data)
 
       decoder.nb_frames++;
       decoder.nb_samples += decoder.frame->nb_samples;
-
       tms_dump_audio_frame(decoder.nb_packets, decoder.nb_frames, decoder.frame);
-
+      ast_debug(2, "decoder.nb_frames:%d,decoder.frame->nb_samples:%d,decoder.nb_samples:%d\n",decoder.nb_frames,decoder.frame->nb_samples,decoder.nb_samples);
       /* 添加时间间隔 */
-      add_interval(&decoder);
-
+      //add_interval(&decoder);
+      //int duration = 320/8000 * 1000 * 1000;
+      //usleep(duration);
       /* 对获得音频帧执行重采样 */
       ret = resample(&resampler, &decoder, &encoder);
       if (ret < 0)
@@ -566,17 +904,24 @@ static int mp3_play(struct ast_channel *chan, const char *data)
         }
         encoder.nb_packets++;
         encoder.nb_bytes += encoder.packet.size;
-
-        ast_debug(2, "生成编码包 #%d size= %d \n", encoder.nb_packets, encoder.packet.size);
-
-        send_rtp(chan, src, &encoder);
+        split_packet_size(chan,src,split_size,tmp,sizeof(tmp), &encoder);
+        //ast_debug(2, "生成编码包 #%d size= %d \n", encoder.nb_packets, encoder.packet.size);
       }
       av_packet_unref(&encoder.packet);
       av_frame_free(&encoder.frame);
     }
+    ast_debug(2,"@@@avcodec_receive_frame while after!@@@\n");
     av_packet_unref(decoder.packet);
   }
+  ast_debug(2,"@@@av_read_frame while after,strlen(tmp):%d !@@@\n",(int)strlen(tmp));
+  if(strlen(tmp)>0)
+  {
 
+    send_rtp(chan, src, tmp,strlen(tmp));
+    ast_debug(2,"@@@av_read_frame while after,#####send_rtp####strlen(tmp):%d !@@@\n",(int)strlen(tmp));
+  }
+ 
+  
   int64_t end_time = av_gettime_relative();
 
   ast_debug(1, "结束播放文件 %s，共读取 %d 个包，共 %d 字节，共生成 %d 个包，共 %d 字节，共发送RTP包 %d 个，采样 %d 个，耗时 %ld\n", filename, decoder.nb_packets, decoder.nb_bytes, encoder.nb_packets, encoder.nb_bytes, encoder.nb_rtps, decoder.nb_samples, end_time - start_time);
@@ -602,6 +947,9 @@ clean:
   /* Exit */
   return ret;
 }
+
+
+
 
 static int unload_module(void)
 {
